@@ -694,7 +694,9 @@ if page == "Single Stock":
             peg = calc_peg(layer1.get('pe'), layer1.get('pat_cagr'))
             momentum = run_momentum_check(qfin)
             ret_1y = get_1y_return(ticker_input)
-            tier, size = get_position_size(acct['score'], acct['num_flags'], cyclical.get('cyclical_peak', False), peg, ret_1y) if acct.get('score') is not None else ('N/A', 'Insufficient data')
+        tier, size = get_position_size(acct['score'], acct['num_flags'], cyclical.get('cyclical_peak', False), peg, ret_1y)
+            if not layer1['phase1_pass'] and tier in ['FULL', 'STANDARD']:
+                tier, size = 'HALF', '4-6% (fails Phase I fundamentals)' if acct.get('score') is not None else ('N/A', 'Insufficient data')
 
         # METRICS ROW
         m1, m2, m3, m4, m5, m6 = st.columns(6)
