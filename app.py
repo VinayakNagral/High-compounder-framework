@@ -422,11 +422,13 @@ def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
     else:
         base = 'HALF'
 
-    if base == 'FULL' and peg is not None and peg < 0.5:
+    if base == 'FULL' and peg is None:
+        return 'STANDARD', '8-10% (growth not measurable)'
+    if base == 'FULL' and peg < 0.5:
         return 'FULL', '12-15%'
     if base == 'FULL' and momentum_1y is not None and momentum_1y < -30:
         return 'HALF', '4-6% (momentum risk)'
-    if base == 'FULL' and peg is not None and peg > 1.5:
+    if base == 'FULL' and peg > 1.5:
         return 'STANDARD', '8-10% (valuation full)'
 
     sizes = {
