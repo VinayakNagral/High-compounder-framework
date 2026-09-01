@@ -493,7 +493,7 @@ def generate_layer_breakdown(layer1, acct, cyclical, peg, momentum, ret_1y, is_b
         layers.append(("Cyclical ROE", "pass", f"Not at cyclical peak. Latest ROE {cyclical.get('latest_roe', 'N/A')}%, normalized {cyclical.get('median_roe', 'N/A')}%"))
 
     # 1Y Return context
- if ret_1y is not None and not (isinstance(ret_1y, float) and np.isnan(ret_1y)):
+    if ret_1y is not None:
         if ret_1y > 30:
             layers.append(("Price Momentum", "pass", f"Stock up {ret_1y:+.1f}% in 1 year — strong market sentiment"))
         elif ret_1y > 0:
