@@ -113,6 +113,8 @@ def get_multi_year_data(fin, bs, cf):
         year_label = str(fin.columns[i].year) if hasattr(fin.columns[i], 'year') else str(i)
 
         revenue = safe_get(fin, 'Total Revenue', i)
+        if revenue is None:
+            revenue = safe_get(fin, 'Operating Revenue', i)
         net_income = safe_get(fin, 'Net Income', i)
         ebitda = safe_get(fin, 'EBITDA', i)
 
@@ -200,6 +202,12 @@ def run_layer1(info, fin, bs):
         ni_latest = safe_get(fin, 'Net Income', 0)
         ni_oldest = safe_get(fin, 'Net Income', fin.shape[1] - 1)
         yrs = fin.shape[1] - 1
+
+             # Fallback to Operating Revenue if Total Revenue is None
+        if rev_latest is None:
+            rev_latest = safe_get(fin, 'Operating Revenue', 0)
+        if rev_oldest is None:
+            rev_oldest = safe_get(fin, 'Operating Revenue', fin.shape[1] - 1)
 
         if rev_latest and rev_oldest and rev_oldest > 0 and yrs > 0:
             results['sales_cagr'] = round(((rev_latest / rev_oldest) ** (1 / yrs) - 1) * 100, 1)
