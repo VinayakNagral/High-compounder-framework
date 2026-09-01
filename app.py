@@ -119,18 +119,21 @@ def is_banking_stock(info, name=""):
 # DATA FETCHING
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def fetch_stock_data(ticker_str):
+def get_1y_return(ticker_str):
     try:
         t = yf.Ticker(ticker_str)
-        info = dict(t.info) if t.info else {}
-        fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
-        bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
-        cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
-        qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
-        return {"info": info, "financials": fin, "balance_sheet": bs, "cashflow": cf, "quarterly_financials": qfin}
+        hist = t.history(period="2y")
+        if hist.empty or len(hist) < 200:
+            return None
+        current = float(hist['Close'].iloc[-1])
+        target_date = datetime.now() - timedelta(days=365)
+        mask = hist.index <= target_date
+        if mask.sum() > 0:
+            past = float(hist.loc[mask, 'Close'].iloc[-1])
+            return round((current / past - 1) * 100, 1)
     except:
-        return None
-
+        pass
+    return None
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_1y_return(ticker_str):
