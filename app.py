@@ -628,8 +628,7 @@ st.markdown('<p class="sub-header">7-Layer Systematic Indian Equity Screener · 
 st.markdown("---")
 
 st.sidebar.title("Navigate")
-page = st.sidebar.radio("", ["🔍 Single Stock", "🏆 Auto Top 10", "📖 How It Works"], label_visibility="collapsed")
-st.sidebar.markdown("---")
+page = st.sidebar.radio("", ["🔍 Single Stock", "🏆 Auto Top 10", "📊 Live Tracker", "📖 How It Works"], label_visibility="collapsed")st.sidebar.markdown("---")
 st.sidebar.markdown("### Portfolio")
 st.sidebar.dataframe(pd.DataFrame({
     "Stock": ["LUPIN","DIXON","ENRIN","BSE","MCX","ICICI AMC","EICHER","KPIT","POLYCAB","HDFC AMC"],
@@ -931,6 +930,211 @@ elif page == "🏆 Auto Top 10":
 # ============================================================
 # PAGE 3: HOW IT WORKS
 # ============================================================
+# ============================================================
+# PAGE 3: LIVE VALIDATION TRACKER
+# ============================================================
+elif page == "📊 Live Tracker":
+    st.subheader("📊 Live Framework Validation")
+    st.markdown("Tracking **BUY picks vs AVOID picks** from September 1, 2026 to prove the framework works forward, not just backward.")
+
+    # Baseline: prices on Sep 1, 2026 (the day framework was built)
+    # UPDATE THESE with actual closing prices on your start date
+    baseline_date = "2026-09-01"
+
+    buy_picks = {
+        "LUPIN.NS":    {"name": "Lupin", "tier": "FULL", "score": 100, "peg": 0.14, "reason": "PEG 0.14, Score 100, pharma compounder with 30% EBITDA margins"},
+        "DIXON.NS":    {"name": "Dixon Technologies", "tier": "FULL", "score": 100, "peg": 0.54, "reason": "India's EMS champion, PLI 2.0 beneficiary, clean cash flows"},
+        "BSE.NS":      {"name": "BSE Limited", "tier": "STANDARD", "score": 85, "peg": 0.38, "reason": "Capital market monopoly, PEG 0.38, 64% revenue growth"},
+        "EICHERMOT.NS":{"name": "Eicher Motors", "tier": "STANDARD", "score": 85, "peg": 1.60, "reason": "Royal Enfield pricing power, defensive anchor"},
+        "KPITTECH.NS": {"name": "KPIT Technologies", "tier": "HALF", "score": 100, "peg": 1.48, "reason": "Score 100 but -51% momentum, contrarian half position"},
+    }
+
+    avoid_picks = {
+        "GODFRYPHLP.NS": {"name": "Godfrey Phillips", "tier": "WATCH", "score": 35, "peg": 0.78, "reason": "Structural tax reset, EBITDA margin collapsed 18.6% to 4.75%"},
+        "WAAREEENER.NS": {"name": "Waaree Energies", "tier": "WATCH", "score": 45, "peg": 0.20, "reason": "Cumulative CFO/PAT 0.44x — profits not converting to cash"},
+        "MAZDOCK.NS":    {"name": "Mazagon Dock", "tier": "WATCH", "score": 25, "peg": 1.16, "reason": "Negative cumulative CFO, lowest score in universe"},
+    }
+
+    benchmark = "^NSEI"
+
+    all_tickers = list(buy_picks.keys()) + list(avoid_picks.keys()) + [benchmark]
+
+    # Fetch baseline prices
+    @st.cache_data(ttl=3600, show_spinner=False)
+    def get_tracker_prices(tickers, base_date):
+        results = {}
+        end = datetime.now()
+        start = datetime.strptime(base_date, "%Y-%m-%d") - timedelta(days=5)
+
+        for ticker in tickers:
+            try:
+                data = yf.download(ticker, start=start, end=end, progress=False)
+                if data.empty:
+                    continue
+                if isinstance(data.columns, pd.MultiIndex):
+                    data.columns = data.columns.get_level_values(0)
+
+                # Baseline price (closest to baseline date)
+                base_dt = pd.Timestamp(base_date)
+                mask = data.index <= base_dt
+                if mask.sum() > 0:
+                    base_price = float(data.loc[mask, 'Close'].iloc[-1])
+                else:
+                    base_price = float(data['Close'].iloc[0])
+
+                current_price = float(data['Close'].iloc[-1])
+                ret = round((current_price / base_price - 1) * 100, 2)
+
+                # Get price history for chart
+                history = data[data.index >= base_dt]['Close'].copy()
+                if not history.empty:
+                    history = (history / history.iloc[0] - 1) * 100
+
+                results[ticker] = {
+                    'base_price': round(base_price, 2),
+                    'current_price': round(current_price, 2),
+                    'return_pct': ret,
+                    'history': history
+                }
+            except:
+                continue
+        return results
+
+    with st.spinner("Fetching live prices..."):
+        prices = get_tracker_prices(all_tickers, baseline_date)
+
+    if not prices:
+        st.error("Could not fetch prices. Try again.")
+        st.stop()
+
+    # Benchmark return
+    bench_ret = prices.get(benchmark, {}).get('return_pct', 0)
+
+    # Build comparison table
+    st.markdown(f"### Performance Since {baseline_date}")
+    st.markdown(f"**Nifty 50 (Benchmark):** {bench_ret:+.2f}%")
+    st.markdown("---")
+
+    # BUY PICKS
+    st.markdown("### 🟢 BUY Picks (Framework said deploy capital)")
+    buy_rows = []
+    for ticker, info in buy_picks.items():
+        p = prices.get(ticker, {})
+        ret = p.get('return_pct', None)
+        alpha = round(ret - bench_ret, 2) if ret is not None else None
+        buy_rows.append({
+            'Stock': info['name'],
+            'Tier': info['tier'],
+            'Score': info['score'],
+            'PEG': info['peg'],
+            'Entry Price': f"₹{p.get('base_price', 'N/A')}",
+            'Current Price': f"₹{p.get('current_price', 'N/A')}",
+            'Return': f"{ret:+.2f}%" if ret is not None else "N/A",
+            'vs Nifty': f"{alpha:+.2f}%" if alpha is not None else "N/A",
+            'Thesis': info['reason']
+        })
+
+    buy_df = pd.DataFrame(buy_rows)
+    st.dataframe(buy_df, hide_index=True, use_container_width=True)
+
+    buy_returns = [prices[t]['return_pct'] for t in buy_picks if t in prices and prices[t].get('return_pct') is not None]
+    if buy_returns:
+        avg_buy = round(np.mean(buy_returns), 2)
+        st.markdown(f"**Average BUY return: {avg_buy:+.2f}%** (vs Nifty {bench_ret:+.2f}%)")
+
+    st.markdown("---")
+
+    # AVOID PICKS
+    st.markdown("### 🔴 AVOID Picks (Framework said do not deploy)")
+    avoid_rows = []
+    for ticker, info in avoid_picks.items():
+        p = prices.get(ticker, {})
+        ret = p.get('return_pct', None)
+        alpha = round(ret - bench_ret, 2) if ret is not None else None
+        avoid_rows.append({
+            'Stock': info['name'],
+            'Tier': info['tier'],
+            'Score': info['score'],
+            'PEG': info['peg'],
+            'Entry Price': f"₹{p.get('base_price', 'N/A')}",
+            'Current Price': f"₹{p.get('current_price', 'N/A')}",
+            'Return': f"{ret:+.2f}%" if ret is not None else "N/A",
+            'vs Nifty': f"{alpha:+.2f}%" if alpha is not None else "N/A",
+            'Reason Avoided': info['reason']
+        })
+
+    avoid_df = pd.DataFrame(avoid_rows)
+    st.dataframe(avoid_df, hide_index=True, use_container_width=True)
+
+    avoid_returns = [prices[t]['return_pct'] for t in avoid_picks if t in prices and prices[t].get('return_pct') is not None]
+    if avoid_returns:
+        avg_avoid = round(np.mean(avoid_returns), 2)
+        st.markdown(f"**Average AVOID return: {avg_avoid:+.2f}%** (vs Nifty {bench_ret:+.2f}%)")
+
+    # VERDICT
+    st.markdown("---")
+    st.markdown("### Framework Validation Verdict")
+
+    if buy_returns and avoid_returns:
+        spread = round(avg_buy - avg_avoid, 2)
+        alpha_vs_nifty = round(avg_buy - bench_ret, 2)
+
+        if spread > 0 and alpha_vs_nifty > 0:
+            st.success(f"""
+            **✅ Framework is working.**
+
+            BUY picks: **{avg_buy:+.2f}%** · AVOID picks: **{avg_avoid:+.2f}%** · Spread: **{spread:+.2f}%**
+
+            BUY picks outperformed AVOID picks by {spread:.1f} percentage points and beat the Nifty by {alpha_vs_nifty:.1f} percentage points.
+            The quality + valuation + momentum framework is generating alpha in live, forward-looking tracking.
+            """)
+        elif spread > 0:
+            st.info(f"""
+            **📊 Partial validation.**
+
+            BUY picks ({avg_buy:+.2f}%) outperformed AVOID picks ({avg_avoid:+.2f}%) by {spread:.1f}pp.
+            However, BUY picks are {'outperforming' if alpha_vs_nifty > 0 else 'underperforming'} the Nifty by {abs(alpha_vs_nifty):.1f}pp.
+            The framework separates good from bad but {'is' if alpha_vs_nifty > 0 else 'is not yet'} generating absolute alpha.
+            """)
+        else:
+            st.warning(f"""
+            **⚠️ Framework not validated yet.**
+
+            BUY picks ({avg_buy:+.2f}%) are currently underperforming AVOID picks ({avg_avoid:+.2f}%).
+            Spread: {spread:+.2f}pp. This could be early-stage noise (give it 3-6 months)
+            or could indicate the framework needs recalibration.
+            Continue monitoring — don't change the methodology based on less than one quarter of data.
+            """)
+
+    # CHART: Cumulative returns
+    st.markdown("---")
+    st.markdown("### Cumulative Return Chart")
+
+    chart_data = pd.DataFrame()
+    for ticker in list(buy_picks.keys()) + list(avoid_picks.keys()) + [benchmark]:
+        p = prices.get(ticker)
+        if p and 'history' in p and not p['history'].empty:
+            label = buy_picks.get(ticker, avoid_picks.get(ticker, {})).get('name', 'Nifty 50')
+            chart_data[label] = p['history']
+
+    if not chart_data.empty:
+        st.line_chart(chart_data)
+        st.caption("Returns indexed to 0% on baseline date. Lines above 0 = gain, below = loss.")
+
+    st.markdown("---")
+    st.markdown("""
+    **How to read this page:**
+
+    This is a forward-looking validation of the framework. On September 1, 2026, the framework identified
+    specific stocks as BUY (clean accounting, cheap valuation, positive momentum) and AVOID (poor cash conversion,
+    structural problems, or broken thesis). This page tracks whether those calls were right.
+
+    If BUY picks consistently outperform AVOID picks by a meaningful margin over 3-6 months, the framework
+    has predictive power — it's not just a nice-looking table, it actually identifies future winners and losers.
+
+    Updated live every time you visit this page.
+    """)
+    st.caption("Tracking started September 1, 2026 · Updated live via Yahoo Finance")
 elif page == "📖 How It Works":
     st.subheader("How This Framework Works")
     st.markdown("""
