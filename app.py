@@ -643,7 +643,7 @@ st.sidebar.caption("Built by Vinayak Nagral · Sep 2026")
 # ============================================================
 # PAGE 1: SINGLE STOCK
 # ============================================================
-if page == "🔍 Single Stock":
+if page == "Single Stock":
     c1, c2 = st.columns([3,1])
     with c1:
         ticker_input = st.text_input("Enter NSE ticker", value="LUPIN", placeholder="LUPIN, BSE, DIXON, TCS, HCLTECH").strip().upper()
@@ -816,7 +816,7 @@ if page == "🔍 Single Stock":
 # ============================================================
 # PAGE 2: AUTO TOP 10
 # ============================================================
-elif page == "🏆 Auto Top 10":
+elif page == "Auto Top 10":
     st.subheader("🏆 Automatic Top 10 Picker")
     st.markdown("Screens Nifty 200 through all 7 layers. Banking/insurance auto-excluded.")
 
@@ -933,7 +933,7 @@ elif page == "🏆 Auto Top 10":
 # ============================================================
 # PAGE 3: LIVE VALIDATION TRACKER
 # ============================================================
-elif page == "📊 Live Tracker":
+elif page == "Live Tracker":
     st.subheader("📊 Live Framework Validation")
     st.markdown("Tracking **BUY picks vs AVOID picks** from September 1, 2026 to prove the framework works forward, not just backward.")
 
@@ -1135,7 +1135,7 @@ elif page == "📊 Live Tracker":
     Updated live every time you visit this page.
     """)
     st.caption("Tracking started September 1, 2026 · Updated live via Yahoo Finance")
-elif page == "📖 How It Works":
+elif page == "How It Works":
     st.subheader("How This Framework Works")
     st.markdown("""
 This dashboard runs a **7-layer systematic analysis** on any NSE-listed stock, designed to find high-quality compounders while avoiding value traps.
