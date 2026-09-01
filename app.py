@@ -6,15 +6,7 @@ from datetime import datetime, timedelta
 import warnings
 warnings.filterwarnings('ignore')
 
-# ============================================================
-# PAGE CONFIG
-# ============================================================
-st.set_page_config(
-    page_title="High Compounder Framework",
-    page_icon="📊",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+st.set_page_config(page_title="High Compounder Framework", page_icon="📊", layout="wide", initial_sidebar_state="expanded")
 
 # ============================================================
 # STYLING
@@ -22,105 +14,32 @@ st.set_page_config(
 st.markdown("""
 <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-
-    .main-header {
-        font-family: 'Inter', sans-serif;
-        font-size: 2.2rem;
-        font-weight: 700;
-        color: #1B2A4A;
-        margin-bottom: 0;
-        letter-spacing: -0.5px;
-    }
-    .sub-header {
-        font-family: 'Inter', sans-serif;
-        font-size: 1rem;
-        color: #888;
-        margin-top: 0;
-    }
-    .score-box {
-        padding: 1.5rem;
-        border-radius: 12px;
-        text-align: center;
-        margin: 0.5rem 0;
-    }
-    .score-green { background: #E8F5E9; border-left: 5px solid #4CAF50; }
-    .score-yellow { background: #FFF8E1; border-left: 5px solid #FF9800; }
-    .score-red { background: #FFEBEE; border-left: 5px solid #F44336; }
-    .flag-item {
-        background: #FFF3E0;
-        padding: 0.6rem 1rem;
-        border-radius: 8px;
-        margin: 0.4rem 0;
-        border-left: 4px solid #FF9800;
-        font-size: 0.9rem;
-    }
-    .clean-item {
-        background: #E8F5E9;
-        padding: 0.6rem 1rem;
-        border-radius: 8px;
-        margin: 0.4rem 0;
-        border-left: 4px solid #4CAF50;
-        font-size: 0.9rem;
-    }
-    .verdict-box {
-        padding: 1.5rem;
-        border-radius: 12px;
-        margin: 1rem 0;
-        font-size: 1rem;
-        line-height: 1.6;
-    }
-    .verdict-buy { background: #E8F5E9; border: 2px solid #4CAF50; }
-    .verdict-hold { background: #FFF8E1; border: 2px solid #FF9800; }
-    .verdict-avoid { background: #FFEBEE; border: 2px solid #F44336; }
-    .tier-full { color: #2E7D32; font-weight: 700; font-size: 1.3rem; }
-    .tier-standard { color: #1565C0; font-weight: 700; font-size: 1.3rem; }
-    .tier-half { color: #F57F17; font-weight: 700; font-size: 1.3rem; }
-    .tier-watch { color: #C62828; font-weight: 700; font-size: 1.3rem; }
-    .banking-warning {
-        background: #E3F2FD;
-        border-left: 4px solid #1565C0;
-        padding: 1rem;
-        border-radius: 8px;
-        margin: 1rem 0;
-    }
-    .top-pick-card {
-        background: #F8F9FA;
-        border-radius: 10px;
-        padding: 1rem 1.2rem;
-        margin: 0.5rem 0;
-        border-left: 4px solid #1B2A4A;
-    }
-    .insight-box {
-        background: #F3E5F5;
-        border-left: 4px solid #7B1FA2;
-        padding: 0.8rem 1rem;
-        border-radius: 8px;
-        margin: 0.5rem 0;
-        font-size: 0.9rem;
-    }
+    .main-header { font-family:'Inter',sans-serif; font-size:2.2rem; font-weight:700; color:#1B2A4A; letter-spacing:-0.5px; }
+    .sub-header { font-family:'Inter',sans-serif; font-size:1rem; color:#888; }
+    .score-box { padding:1.2rem; border-radius:12px; text-align:center; margin:0.5rem 0; }
+    .score-green { background:#E8F5E9; border-left:5px solid #4CAF50; }
+    .score-yellow { background:#FFF8E1; border-left:5px solid #FF9800; }
+    .score-red { background:#FFEBEE; border-left:5px solid #F44336; }
+    .flag-item { background:#FFF3E0; padding:0.5rem 1rem; border-radius:8px; margin:0.3rem 0; border-left:4px solid #FF9800; font-size:0.9rem; }
+    .clean-item { background:#E8F5E9; padding:0.5rem 1rem; border-radius:8px; margin:0.3rem 0; border-left:4px solid #4CAF50; font-size:0.9rem; }
+    .tier-full { color:#2E7D32; font-weight:700; font-size:1.3rem; }
+    .tier-standard { color:#1565C0; font-weight:700; font-size:1.3rem; }
+    .tier-half { color:#F57F17; font-weight:700; font-size:1.3rem; }
+    .tier-watch { color:#C62828; font-weight:700; font-size:1.3rem; }
+    .banking-box { background:#E3F2FD; border-left:4px solid #1565C0; padding:1rem; border-radius:8px; margin:1rem 0; }
+    .layer-pass { background:#E8F5E9; padding:0.4rem 0.8rem; border-radius:6px; margin:0.2rem 0; border-left:3px solid #4CAF50; }
+    .layer-fail { background:#FFEBEE; padding:0.4rem 0.8rem; border-radius:6px; margin:0.2rem 0; border-left:3px solid #F44336; }
+    .layer-warn { background:#FFF8E1; padding:0.4rem 0.8rem; border-radius:6px; margin:0.2rem 0; border-left:3px solid #FF9800; }
+    .verdict-section { background:#F8F9FA; padding:1.5rem; border-radius:12px; margin:1rem 0; border:1px solid #E0E0E0; line-height:1.7; }
 </style>
 """, unsafe_allow_html=True)
 
-
-# ============================================================
-# CONSTANTS
-# ============================================================
-BANKING_SECTORS = [
-    'Financial Services', 'Banks', 'Insurance', 'Banking',
-    'Banks - Regional', 'Banks - Diversified', 'Insurance - Life',
-    'Insurance - Property & Casualty', 'Credit Services'
-]
-
-BANKING_KEYWORDS = [
-    'bank', 'finance', 'insurance', 'nbfc', 'housing finance',
-    'credit', 'lending', 'microfinance'
-]
-
+BANKING_KEYWORDS = ['bank', 'finance', 'insurance', 'nbfc', 'housing finance', 'credit', 'lending', 'microfinance']
 NIFTY_200_URL = "https://archives.nseindia.com/content/indices/ind_nifty200list.csv"
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# ROBUST DATA EXTRACTION
 # ============================================================
 def safe_get(df, label, col=0):
     try:
@@ -133,27 +52,66 @@ def safe_get(df, label, col=0):
     return None
 
 
+def safe_fmt(val, fmt=".1f", suffix="", prefix=""):
+    """Safely format a number for display. Returns 'N/A' if None/NaN."""
+    if val is None:
+        return "N/A"
+    try:
+        if np.isnan(val):
+            return "N/A"
+    except (TypeError, ValueError):
+        pass
+    return f"{prefix}{val:{fmt}}{suffix}"
+
+
 def get_revenue(fin, col=0):
-    """Get revenue with multiple fallbacks."""
-    val = safe_get(fin, 'Total Revenue', col)
-    if val is None:
-        val = safe_get(fin, 'Operating Revenue', col)
-    if val is None:
-        val = safe_get(fin, 'Revenue', col)
-    return val
+    """Get revenue with exhaustive fallbacks for Indian stocks."""
+    for field in ['Total Revenue', 'Operating Revenue', 'Revenue', 'Net Revenue']:
+        val = safe_get(fin, field, col)
+        if val and val > 0:
+            return val
+    return None
+
+
+def get_net_income(fin, col=0):
+    for field in ['Net Income', 'Net Income Common Stockholders', 'Net Income Continuous Operations']:
+        val = safe_get(fin, field, col)
+        if val is not None:
+            return val
+    return None
+
+
+def get_ebitda(fin, col=0):
+    for field in ['EBITDA', 'Normalized EBITDA']:
+        val = safe_get(fin, field, col)
+        if val and val > 0:
+            return val
+    return None
+
+
+def get_equity(bs, col=0):
+    for field in ['Stockholders Equity', 'Total Stockholders Equity', 'Common Stock Equity', 'Total Equity Gross Minority Interest']:
+        val = safe_get(bs, field, col)
+        if val and val > 0:
+            return val
+    return None
+
+
+def get_cfo(cf, col=0):
+    for field in ['Operating Cash Flow', 'Total Cash From Operating Activities', 'Cash Flow From Continuing Operating Activities', 'Free Cash Flow']:
+        val = safe_get(cf, field, col)
+        if val is not None:
+            return val
+    return None
 
 
 def is_banking_stock(info, name=""):
-    """Detect if a stock is a bank/NBFC/insurance company."""
     sector = (info.get('sector', '') or '').lower()
     industry = (info.get('industry', '') or '').lower()
     stock_name = (info.get('shortName', '') or name or '').lower()
-
     for kw in BANKING_KEYWORDS:
         if kw in sector or kw in industry or kw in stock_name:
             return True
-    if info.get('sector', '') in BANKING_SECTORS:
-        return True
     return False
 
 
@@ -169,8 +127,7 @@ def fetch_stock_data(ticker_str):
         bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
         cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
         qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
-        return {"info": info, "financials": fin, "balance_sheet": bs,
-                "cashflow": cf, "quarterly_financials": qfin}
+        return {"info": info, "financials": fin, "balance_sheet": bs, "cashflow": cf, "quarterly_financials": qfin}
     except:
         return None
 
@@ -211,45 +168,21 @@ def get_multi_year_data(fin, bs, cf):
     years = min(fin.shape[1], bs.shape[1], cf.shape[1])
     if years < 2:
         return None
-
     records = []
     for i in range(years):
         year_label = str(fin.columns[i].year) if hasattr(fin.columns[i], 'year') else str(i)
-
-        revenue = get_revenue(fin, i)
-        net_income = safe_get(fin, 'Net Income', i)
-        ebitda = safe_get(fin, 'EBITDA', i)
-        ebit = safe_get(fin, 'EBIT', i)
-
-        receivables = safe_get(bs, 'Accounts Receivable', i)
-        if receivables is None:
-            receivables = safe_get(bs, 'Net Receivables', i)
-        if receivables is None:
-            receivables = safe_get(bs, 'Receivables', i)
-
-        inventory = safe_get(bs, 'Inventory', i)
-        total_assets = safe_get(bs, 'Total Assets', i)
-
-        equity = safe_get(bs, 'Stockholders Equity', i)
-        if equity is None:
-            equity = safe_get(bs, 'Total Stockholders Equity', i)
-        if equity is None:
-            equity = safe_get(bs, 'Common Stock Equity', i)
-
-        current_liabilities = safe_get(bs, 'Current Liabilities', i)
-
-        cfo = safe_get(cf, 'Operating Cash Flow', i)
-        if cfo is None:
-            cfo = safe_get(cf, 'Total Cash From Operating Activities', i)
-        if cfo is None:
-            cfo = safe_get(cf, 'Cash Flow From Continuing Operating Activities', i)
-
         records.append({
-            'year': year_label, 'revenue': revenue, 'net_income': net_income,
-            'ebitda': ebitda, 'ebit': ebit, 'receivables': receivables,
-            'inventory': inventory, 'total_assets': total_assets,
-            'equity': equity, 'current_liabilities': current_liabilities,
-            'cfo': cfo
+            'year': year_label,
+            'revenue': get_revenue(fin, i),
+            'net_income': get_net_income(fin, i),
+            'ebitda': get_ebitda(fin, i),
+            'ebit': safe_get(fin, 'EBIT', i),
+            'receivables': safe_get(bs, 'Accounts Receivable', i) or safe_get(bs, 'Net Receivables', i) or safe_get(bs, 'Receivables', i),
+            'inventory': safe_get(bs, 'Inventory', i),
+            'total_assets': safe_get(bs, 'Total Assets', i),
+            'equity': get_equity(bs, i),
+            'current_liabilities': safe_get(bs, 'Current Liabilities', i),
+            'cfo': get_cfo(cf, i)
         })
     return records
 
@@ -258,63 +191,63 @@ def get_multi_year_data(fin, bs, cf):
 # LAYER 1: FUNDAMENTALS
 # ============================================================
 def run_layer1(info, fin, bs):
-    results = {}
-
+    r = {}
     mcap = info.get('marketCap', 0) or 0
-    results['market_cap_cr'] = round(mcap / 1e7, 0) if mcap else None
-    results['mcap_pass'] = mcap > 150_000_000_000
+    r['market_cap_cr'] = round(mcap / 1e7, 0) if mcap else None
+    r['mcap_pass'] = mcap > 150_000_000_000
 
-    results['pe'] = info.get('trailingPE')
+    r['pe'] = info.get('trailingPE')
 
     de = info.get('debtToEquity', 0) or 0
-    results['debt_to_equity'] = round(de / 100, 2) if de else 0
-    results['de_pass'] = de < 50
+    r['debt_to_equity'] = round(de / 100, 2) if de else 0
+    r['de_pass'] = de < 50
 
-    ni = safe_get(fin, 'Net Income', 0) if fin is not None else None
-    eq = safe_get(bs, 'Stockholders Equity', 0) if bs is not None else None
-    if eq is None and bs is not None:
-        eq = safe_get(bs, 'Common Stock Equity', 0)
+    ni = get_net_income(fin, 0) if fin is not None else None
+    eq = get_equity(bs, 0) if bs is not None else None
     if ni and eq and eq > 0:
-        results['roe'] = round(ni / eq * 100, 1)
-        results['roe_pass'] = results['roe'] > 15
+        r['roe'] = round(ni / eq * 100, 1)
+        r['roe_pass'] = r['roe'] > 15
     else:
-        results['roe'] = None
-        results['roe_pass'] = False
+        r['roe'] = None
+        r['roe_pass'] = False
 
-    ebit = safe_get(fin, 'EBIT', 0) if fin is not None else None
+    ebit_val = safe_get(fin, 'EBIT', 0) if fin is not None else None
     ta = safe_get(bs, 'Total Assets', 0) if bs is not None else None
     cl = safe_get(bs, 'Current Liabilities', 0) if bs is not None else None
-    if ebit and ta and cl and (ta - cl) > 0:
-        results['roce'] = round(ebit / (ta - cl) * 100, 1)
-        results['roce_pass'] = results['roce'] > 18
+    if ebit_val and ta and cl and (ta - cl) > 0:
+        r['roce'] = round(ebit_val / (ta - cl) * 100, 1)
+        r['roce_pass'] = r['roce'] > 18
     else:
-        results['roce'] = None
-        results['roce_pass'] = False
+        r['roce'] = None
+        r['roce_pass'] = False
 
-    results['sales_cagr'] = None
-    results['pat_cagr'] = None
+    r['sales_cagr'] = None
+    r['pat_cagr'] = None
     if fin is not None and fin.shape[1] >= 2:
         yrs = fin.shape[1] - 1
-        rev_latest = get_revenue(fin, 0)
-        rev_oldest = get_revenue(fin, fin.shape[1] - 1)
-        ni_latest = safe_get(fin, 'Net Income', 0)
-        ni_oldest = safe_get(fin, 'Net Income', fin.shape[1] - 1)
+        rev_l = get_revenue(fin, 0)
+        rev_o = get_revenue(fin, fin.shape[1] - 1)
+        ni_l = get_net_income(fin, 0)
+        ni_o = get_net_income(fin, fin.shape[1] - 1)
 
-        if rev_latest and rev_oldest and rev_oldest > 0 and yrs > 0:
-            results['sales_cagr'] = round(((rev_latest / rev_oldest) ** (1 / yrs) - 1) * 100, 1)
-        if ni_latest and ni_oldest and ni_oldest > 0 and yrs > 0:
-            results['pat_cagr'] = round(((ni_latest / ni_oldest) ** (1 / yrs) - 1) * 100, 1)
+        if rev_l and rev_o and rev_o > 0 and yrs > 0:
+            r['sales_cagr'] = round(((rev_l / rev_o) ** (1 / yrs) - 1) * 100, 1)
+        if ni_l and ni_o and ni_o > 0 and yrs > 0:
+            r['pat_cagr'] = round(((ni_l / ni_o) ** (1 / yrs) - 1) * 100, 1)
 
-    results['growth_pass'] = (
-        (results.get('sales_cagr') or 0) > 15 and
-        (results.get('pat_cagr') or 0) > 15
-    )
+    # Fallback: use info dict growth rates if financials didn't work
+    if r['sales_cagr'] is None:
+        rg = info.get('revenueGrowth')
+        if rg is not None:
+            r['sales_cagr'] = round(rg * 100, 1)
+    if r['pat_cagr'] is None:
+        eg = info.get('earningsGrowth')
+        if eg is not None:
+            r['pat_cagr'] = round(eg * 100, 1)
 
-    results['phase1_pass'] = all([
-        results['mcap_pass'], results['de_pass'], results['roe_pass'],
-        results['roce_pass'], results['growth_pass']
-    ])
-    return results
+    r['growth_pass'] = ((r.get('sales_cagr') or 0) > 15 and (r.get('pat_cagr') or 0) > 15)
+    r['phase1_pass'] = all([r['mcap_pass'], r['de_pass'], r['roe_pass'], r['roce_pass'], r['growth_pass']])
+    return r
 
 
 # ============================================================
@@ -324,30 +257,29 @@ def run_accounting_quality(data):
     flags = []
     score = 100
     details = {}
+    sd = sorted(data, key=lambda x: x['year'])
+    latest = sd[-1]
+    prior = sd[-2] if len(sd) >= 2 else None
 
-    sorted_data = sorted(data, key=lambda x: x['year'])
-    latest = sorted_data[-1]
-    prior = sorted_data[-2] if len(sorted_data) >= 2 else None
-
-    # CHECK 1: Receivables trend
+    # CHECK 1: Receivables
     recv_pcts = []
-    for d in sorted_data:
+    for d in sd:
         if d['revenue'] and d['receivables'] and d['revenue'] > 0:
             recv_pcts.append(round(d['receivables'] / d['revenue'] * 100, 1))
         else:
             recv_pcts.append(None)
     details['recv_pcts'] = recv_pcts
-    details['recv_years'] = [d['year'] for d in sorted_data]
+    details['recv_years'] = [d['year'] for d in sd]
 
     if len(recv_pcts) >= 3:
         valid = [x for x in recv_pcts if x is not None]
         if len(valid) >= 3:
-            rising = sum(1 for i in range(1, len(valid)) if valid[i] > valid[i - 1])
+            rising = sum(1 for i in range(1, len(valid)) if valid[i] > valid[i-1])
             if rising >= 2:
                 flags.append(f"Receivables rising: {valid[-3]}% → {valid[-2]}% → {valid[-1]}% of revenue")
                 score -= 15
 
-    # CHECK 2: Inventory vs Sales
+    # CHECK 2: Inventory
     if prior:
         inv_l, inv_p = latest.get('inventory'), prior.get('inventory')
         rev_l, rev_p = latest.get('revenue'), prior.get('revenue')
@@ -357,21 +289,19 @@ def run_accounting_quality(data):
             details['inv_growth'] = inv_g
             details['rev_growth'] = rev_g
             if inv_g > rev_g + 10:
-                flags.append(f"Inventory bloat: Inventory grew {inv_g}% vs Revenue {rev_g}%")
+                flags.append(f"Inventory bloat: grew {inv_g}% vs Revenue {rev_g}%")
                 score -= 15
 
     # CHECK 3: Cumulative CFO/PAT
-    total_cfo = sum(d['cfo'] for d in sorted_data if d.get('cfo') is not None)
-    total_pat = sum(d['net_income'] for d in sorted_data if d.get('net_income') is not None)
-
+    total_cfo = sum(d['cfo'] for d in sd if d.get('cfo') is not None)
+    total_pat = sum(d['net_income'] for d in sd if d.get('net_income') is not None)
     if total_pat > 0:
-        cum_cfo_pat = round(total_cfo / total_pat, 2)
-        details['cum_cfo_pat'] = cum_cfo_pat
-        if cum_cfo_pat < 0.5:
-            flags.append(f"Critical: Cumulative CFO/PAT = {cum_cfo_pat}x over {len(sorted_data)} years")
+        details['cum_cfo_pat'] = round(total_cfo / total_pat, 2)
+        if details['cum_cfo_pat'] < 0.5:
+            flags.append(f"Critical: Cumulative CFO/PAT = {details['cum_cfo_pat']}x over {len(sd)} years")
             score -= 30
-        elif cum_cfo_pat < 0.7:
-            flags.append(f"Low cash conversion: Cumulative CFO/PAT = {cum_cfo_pat}x over {len(sorted_data)} years")
+        elif details['cum_cfo_pat'] < 0.7:
+            flags.append(f"Low cash conversion: Cumulative CFO/PAT = {details['cum_cfo_pat']}x over {len(sd)} years")
             score -= 20
     else:
         details['cum_cfo_pat'] = None
@@ -380,32 +310,30 @@ def run_accounting_quality(data):
         details['single_yr_cfo_pat'] = round(latest['cfo'] / latest['net_income'], 2)
 
     # CHECK 4: Cumulative CFO/EBITDA
-    total_ebitda = sum(d['ebitda'] for d in sorted_data if d.get('ebitda') is not None and d['ebitda'] > 0)
+    total_ebitda = sum(d['ebitda'] for d in sd if d.get('ebitda') is not None and d['ebitda'] > 0)
     if total_ebitda > 0:
-        cum_cfo_ebitda = round(total_cfo / total_ebitda, 2)
-        details['cum_cfo_ebitda'] = cum_cfo_ebitda
-        if cum_cfo_ebitda < 0.5:
-            flags.append(f"Critical: Cumulative CFO/EBITDA = {cum_cfo_ebitda}x over {len(sorted_data)} years")
+        details['cum_cfo_ebitda'] = round(total_cfo / total_ebitda, 2)
+        if details['cum_cfo_ebitda'] < 0.5:
+            flags.append(f"Critical: Cumulative CFO/EBITDA = {details['cum_cfo_ebitda']}x over {len(sd)} years")
             score -= 20
-        elif cum_cfo_ebitda < 0.7:
-            flags.append(f"Weak: Cumulative CFO/EBITDA = {cum_cfo_ebitda}x over {len(sorted_data)} years")
+        elif details['cum_cfo_ebitda'] < 0.7:
+            flags.append(f"Weak: Cumulative CFO/EBITDA = {details['cum_cfo_ebitda']}x over {len(sd)} years")
             score -= 15
     else:
         details['cum_cfo_ebitda'] = None
 
     yr_ratios = []
-    for d in sorted_data:
+    for d in sd:
         if d.get('cfo') is not None and d.get('ebitda') and d['ebitda'] > 0:
             yr_ratios.append(round(d['cfo'] / d['ebitda'], 2))
     details['cfo_ebitda_trend'] = yr_ratios
-
     if len(yr_ratios) >= 2 and details.get('cum_cfo_ebitda'):
         if yr_ratios[-1] < yr_ratios[-2] and yr_ratios[-1] < 0.5 and details['cum_cfo_ebitda'] < 0.7:
-            flags.append(f"Deteriorating: CFO/EBITDA fell {yr_ratios[-2]} → {yr_ratios[-1]} AND cumulative weak")
+            flags.append(f"Deteriorating trend: CFO/EBITDA fell {yr_ratios[-2]} → {yr_ratios[-1]} AND cumulative weak")
             score -= 10
 
     if total_cfo < 0:
-        flags.append(f"Negative cumulative CFO over {len(sorted_data)} years")
+        flags.append(f"Negative cumulative CFO over {len(sd)} years")
         score -= 25
 
     score = max(score, 0)
@@ -416,28 +344,26 @@ def run_accounting_quality(data):
 
 
 # ============================================================
-# LAYER 6: CYCLICAL CHECK
+# LAYER 6: CYCLICAL
 # ============================================================
 def run_cyclical_check(data):
-    sorted_data = sorted(data, key=lambda x: x['year'])
-    roe_values, roe_by_year = [], {}
-    for d in sorted_data:
+    sd = sorted(data, key=lambda x: x['year'])
+    roe_vals, roe_by_year = [], {}
+    for d in sd:
         if d.get('net_income') and d.get('equity') and d['equity'] > 0:
             roe = round(d['net_income'] / d['equity'] * 100, 1)
-            roe_values.append(roe)
+            roe_vals.append(roe)
             roe_by_year[d['year']] = roe
-
-    if len(roe_values) < 2:
+    if len(roe_vals) < 2:
         return {'cyclical_peak': False, 'roe_values': [], 'roe_by_year': {}}
-
-    latest = roe_values[-1]
-    avg = round(np.mean(roe_values), 1)
-    median = round(np.median(roe_values), 1)
+    latest = roe_vals[-1]
+    avg = round(np.mean(roe_vals), 1)
+    median = round(np.median(roe_vals), 1)
     return {
         'latest_roe': latest, 'avg_roe': avg, 'median_roe': median,
-        'min_roe': round(min(roe_values), 1), 'normalized_roe': median,
+        'min_roe': round(min(roe_vals), 1), 'normalized_roe': median,
         'cyclical_peak': latest > avg * 2 and latest > 20,
-        'roe_values': roe_values, 'roe_by_year': roe_by_year
+        'roe_values': roe_vals, 'roe_by_year': roe_by_year
     }
 
 
@@ -447,25 +373,19 @@ def run_cyclical_check(data):
 def run_momentum_check(qfin):
     if qfin is None or qfin.shape[1] < 3:
         return {'available': False}
-
-    eps_values, quarters = [], []
+    eps_vals, quarters = [], []
     for i in range(min(4, qfin.shape[1])):
-        eps = safe_get(qfin, 'Diluted EPS', i)
-        if eps is None:
-            eps = safe_get(qfin, 'Basic EPS', i)
+        eps = safe_get(qfin, 'Diluted EPS', i) or safe_get(qfin, 'Basic EPS', i)
         if eps is not None:
-            eps_values.append(eps)
-            q_label = str(qfin.columns[i].strftime('%b %Y')) if hasattr(qfin.columns[i], 'strftime') else str(i)
-            quarters.append(q_label)
-
-    if len(eps_values) < 3:
+            eps_vals.append(eps)
+            quarters.append(str(qfin.columns[i].strftime('%b %Y')) if hasattr(qfin.columns[i], 'strftime') else str(i))
+    if len(eps_vals) < 3:
         return {'available': False}
-
-    latest_qoq = round((eps_values[0] / eps_values[1] - 1) * 100, 1) if eps_values[1] != 0 else None
-    prior_qoq = round((eps_values[1] / eps_values[2] - 1) * 100, 1) if eps_values[2] != 0 else None
     return {
-        'available': True, 'latest_qoq': latest_qoq, 'prior_qoq': prior_qoq,
-        'eps_values': eps_values[:4], 'quarters': quarters[:4]
+        'available': True,
+        'latest_qoq': round((eps_vals[0] / eps_vals[1] - 1) * 100, 1) if eps_vals[1] != 0 else None,
+        'prior_qoq': round((eps_vals[1] / eps_vals[2] - 1) * 100, 1) if eps_vals[2] != 0 else None,
+        'eps_values': eps_vals[:4], 'quarters': quarters[:4]
     }
 
 
@@ -475,7 +395,6 @@ def run_momentum_check(qfin):
 def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
     if acct_score < 50:
         return 'WATCH', '0% (monitor only)'
-
     if acct_score >= 85 and num_flags == 0 and not cyclical_peak:
         base = 'FULL'
     elif acct_score >= 70 and num_flags <= 1:
@@ -483,7 +402,7 @@ def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
     else:
         base = 'HALF'
 
-    if base == 'FULL' and peg is None:
+    if base == 'FULL' and (peg is None or (isinstance(peg, float) and np.isnan(peg))):
         return 'STANDARD', '8-10% (growth not measurable)'
     if base == 'FULL' and peg < 0.5:
         return 'FULL', '12-15%'
@@ -491,7 +410,6 @@ def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
         return 'HALF', '4-6% (momentum risk)'
     if base == 'FULL' and peg > 1.5:
         return 'STANDARD', '8-10% (valuation full)'
-
     return {'FULL': ('FULL', '12-15%'), 'STANDARD': ('STANDARD', '8-10%'), 'HALF': ('HALF', '4-6%')}[base]
 
 
@@ -502,133 +420,201 @@ def calc_peg(pe, pat_cagr):
 
 
 # ============================================================
-# VERDICT GENERATOR
+# DETAILED VERDICT GENERATOR
 # ============================================================
-def generate_verdict(name, tier, size, layer1, acct, cyclical, peg, ret_1y, momentum, is_bank):
-    """Generate a human-readable investment verdict."""
-    lines = []
+def generate_layer_breakdown(layer1, acct, cyclical, peg, momentum, ret_1y, is_bank):
+    """Returns list of (layer_name, status, detail) tuples."""
+    layers = []
 
-    if is_bank:
-        return f"**{name}** is a banking/financial services company. This framework uses ROE, D/E, and CFO/EBITDA metrics designed for non-financial companies. Banks require a separate framework using NIM, CASA ratio, Credit Cost, GNPA/NNPA, and Provision Coverage. The scores shown above should not be used for investment decisions on this stock."
+    # Layer 1
+    if layer1['phase1_pass']:
+        layers.append(("Fundamentals", "pass", f"Market Cap ₹{safe_fmt(layer1.get('market_cap_cr'), ',.0f')} Cr · ROE {safe_fmt(layer1.get('roe'), '.1f')}% · ROCE {safe_fmt(layer1.get('roce'), '.1f')}% · D/E {layer1.get('debt_to_equity', 'N/A')} · Sales CAGR {safe_fmt(layer1.get('sales_cagr'), '.1f')}% · PAT CAGR {safe_fmt(layer1.get('pat_cagr'), '.1f')}%"))
+    else:
+        fails = []
+        if not layer1['mcap_pass']: fails.append(f"Market cap ₹{safe_fmt(layer1.get('market_cap_cr'), ',.0f')} Cr below ₹15,000 Cr threshold")
+        if not layer1['roe_pass']: fails.append(f"ROE {safe_fmt(layer1.get('roe'), '.1f')}% below 15%")
+        if not layer1['roce_pass']: fails.append(f"ROCE {safe_fmt(layer1.get('roce'), '.1f')}% below 18%")
+        if not layer1['de_pass']: fails.append(f"D/E {layer1.get('debt_to_equity', 'N/A')} above 0.5")
+        if not layer1['growth_pass']: fails.append(f"Growth too slow — Sales CAGR {safe_fmt(layer1.get('sales_cagr'), '.1f')}%, PAT CAGR {safe_fmt(layer1.get('pat_cagr'), '.1f')}%")
+        layers.append(("Fundamentals", "fail", " · ".join(fails) if fails else "Multiple criteria not met"))
 
-    score = acct.get('score', 0)
-    pe = layer1.get('pe')
-
-    if tier == 'FULL':
-        lines.append(f"**{name}** passes all 7 layers with conviction.")
-        if peg and peg < 0.5:
-            lines.append(f"At PEG {peg}, the market is significantly underpricing the growth — you're paying {int(peg*100)} paise for every rupee of growth.")
+    # Layer 2-3: Accounting
+    score = acct.get('score')
+    if score is not None:
         if score >= 85:
-            cfo_pat = acct.get('cum_cfo_pat', 0)
-            if cfo_pat and cfo_pat > 1.0:
-                lines.append(f"Cash quality is exceptional — cumulative CFO/PAT of {cfo_pat}x means the company generates more cash than it reports as profit.")
-            elif cfo_pat and cfo_pat >= 0.7:
-                lines.append(f"Cash quality is healthy at {cfo_pat}x cumulative CFO/PAT.")
-        lines.append(f"**Deploy 12-15% of portfolio.**")
+            layers.append(("Forensic Accounting", "pass", f"Score {score}/100 · Cumulative CFO/PAT {safe_fmt(acct.get('cum_cfo_pat'), '.2f')}x · CFO/EBITDA {safe_fmt(acct.get('cum_cfo_ebitda'), '.2f')}x · Cash generation validates reported profits"))
+        elif score >= 50:
+            flag_text = " · ".join(acct.get('flags', [])[:2])
+            layers.append(("Forensic Accounting", "warn", f"Score {score}/100 · {acct.get('num_flags', 0)} flag(s) · {flag_text}"))
+        else:
+            flag_text = " · ".join(acct.get('flags', [])[:2])
+            layers.append(("Forensic Accounting", "fail", f"Score {score}/100 · {acct.get('num_flags', 0)} flag(s) · {flag_text}"))
 
-    elif tier == 'STANDARD':
-        lines.append(f"**{name}** has solid fundamentals with minor concerns.")
-        if peg and peg > 1.5:
-            lines.append(f"PEG of {peg} means the valuation is full — growth justifies the PE but there's no discount.")
-        if cyclical.get('cyclical_peak'):
-            norm = cyclical.get('median_roe')
-            latest = cyclical.get('latest_roe')
-            lines.append(f"ROE is at cyclical peak ({latest}% vs normalized {norm}%). Use {norm}% for any valuation model, not the inflated current figure.")
-        lines.append(f"**Position at 8-10%.** Good business, fair price.")
+    # Layer 4: PEG
+    if peg is not None and not (isinstance(peg, float) and np.isnan(peg)):
+        if peg < 0.5:
+            layers.append(("PEG Valuation", "pass", f"PEG {peg:.2f} — significantly undervalued. Paying {int(peg*100)} paise per rupee of growth"))
+        elif peg < 1.0:
+            layers.append(("PEG Valuation", "pass", f"PEG {peg:.2f} — attractive. Growth more than justifies the PE"))
+        elif peg < 1.5:
+            layers.append(("PEG Valuation", "warn", f"PEG {peg:.2f} — fairly valued. Growth roughly matches PE, no discount"))
+        elif peg < 2.0:
+            layers.append(("PEG Valuation", "warn", f"PEG {peg:.2f} — expensive. Paying a premium over what growth justifies"))
+        else:
+            layers.append(("PEG Valuation", "fail", f"PEG {peg:.2f} — overvalued. PE far exceeds what growth justifies"))
+    else:
+        layers.append(("PEG Valuation", "warn", "PEG not calculable — either negative/zero earnings growth or PE unavailable"))
 
-    elif tier == 'HALF':
-        lines.append(f"**{name}** shows mixed signals across the framework.")
-        if score < 70 and score >= 50:
-            lines.append(f"Accounting quality score of {score}/100 means cash flows need investigation. Read the annual report before adding money.")
-        if ret_1y and ret_1y < -30:
-            lines.append(f"The stock is down {ret_1y}% in 1 year. Even if cash flows are clean, the market is pricing in deceleration that needs to be understood.")
-        if peg and peg > 2.0:
-            lines.append(f"PEG of {peg} means you're paying a significant premium over what growth justifies.")
-        lines.append(f"**Half position at 4-6%.** Add only after next quarterly results confirm the thesis.")
-
-    elif tier == 'WATCH':
-        lines.append(f"**{name}** fails critical checks. Do not deploy capital.")
-        if score < 50:
-            cfo_pat = acct.get('cum_cfo_pat')
-            if cfo_pat and cfo_pat < 0.5:
-                lines.append(f"Cumulative CFO/PAT of {cfo_pat}x over multiple years means reported profits are not converting to cash. This is not a timing issue — it's a structural quality problem.")
-        for flag in acct.get('flags', [])[:2]:
-            lines.append(f"Flag: {flag}")
-        lines.append(f"**Monitor quarterly. Re-evaluate when the specific flags improve.**")
-
-    # Add PE warning
+    pe = layer1.get('pe')
     if pe and pe > 80:
-        lines.append(f"⚠️ PE of {pe:.0f} triggers the Adani Filter — extremely high risk unless earnings catch up within 2 years.")
+        layers.append(("Adani Filter", "fail", f"PE {pe:.0f} exceeds 80 — extremely high risk unless earnings catch up within 2 years"))
 
-    return " \n".join(lines)
+    # Layer 5: Momentum
+    if momentum.get('available'):
+        lq = momentum.get('latest_qoq')
+        pq = momentum.get('prior_qoq')
+        if lq is not None and pq is not None:
+            if lq > 0 and pq > 0:
+                layers.append(("Earnings Momentum", "pass", f"Both quarters positive — latest QoQ {lq:+.1f}%, prior {pq:+.1f}%. Trend confirmed"))
+            elif lq > 0 or pq > 0:
+                layers.append(("Earnings Momentum", "warn", f"Mixed — latest QoQ {lq:+.1f}%, prior {pq:+.1f}%. One quarter positive, one negative"))
+            else:
+                layers.append(("Earnings Momentum", "fail", f"Both quarters declining — latest QoQ {lq:+.1f}%, prior {pq:+.1f}%. Momentum has turned negative"))
+    else:
+        layers.append(("Earnings Momentum", "warn", "Insufficient quarterly data to assess momentum"))
+
+    # Layer 6: Cyclical
+    if cyclical.get('cyclical_peak'):
+        layers.append(("Cyclical ROE", "warn", f"CYCLICAL PEAK — Latest ROE {cyclical['latest_roe']}% vs normalized {cyclical['median_roe']}%. Use {cyclical['median_roe']}% for valuation, not {cyclical['latest_roe']}%"))
+    elif cyclical.get('roe_by_year'):
+        layers.append(("Cyclical ROE", "pass", f"Not at cyclical peak. Latest ROE {cyclical.get('latest_roe', 'N/A')}%, normalized {cyclical.get('median_roe', 'N/A')}%"))
+
+    # 1Y Return context
+    if ret_1y is not None:
+        if ret_1y > 30:
+            layers.append(("Price Momentum", "pass", f"Stock up {ret_1y:+.1f}% in 1 year — strong market sentiment"))
+        elif ret_1y > 0:
+            layers.append(("Price Momentum", "pass", f"Stock up {ret_1y:+.1f}% in 1 year — steady"))
+        elif ret_1y > -20:
+            layers.append(("Price Momentum", "warn", f"Stock down {ret_1y:.1f}% in 1 year — mild weakness"))
+        else:
+            layers.append(("Price Momentum", "fail", f"Stock down {ret_1y:.1f}% in 1 year — significant selling pressure"))
+
+    return layers
+
+
+def generate_verdict_text(name, tier, size, layer1, acct, cyclical, peg, ret_1y, momentum, is_bank):
+    """Generate a multi-paragraph investment verdict."""
+    if is_bank:
+        return f"**{name}** is a banking or financial services company. This framework uses ROE, D/E, and CFO/EBITDA metrics designed for non-financial companies. Banks require a separate framework using NIM (Net Interest Margin), CASA ratio, Credit Cost, GNPA/NNPA trends, and Provision Coverage Ratio. The scores above are shown for reference only and should not drive investment decisions on this stock."
+
+    score = acct.get('score', 0) or 0
+    pe = layer1.get('pe')
+    roe = layer1.get('roe')
+    cfo_pat = acct.get('cum_cfo_pat')
+    paras = []
+
+    # Paragraph 1: Overall assessment
+    if tier == 'FULL':
+        paras.append(f"**{name}** passes all 7 layers of the framework with conviction. This is a stock where accounting quality is pristine, valuation is attractive relative to growth, and earnings momentum is supportive. The data supports a full 12-15% portfolio allocation.")
+    elif tier == 'STANDARD':
+        paras.append(f"**{name}** is a solid business with good fundamentals but one or more factors prevent full conviction. This could be slightly rich valuation, a cyclical earnings peak, or growth that's harder to measure. The data supports an 8-10% position — a good business at a fair price.")
+    elif tier == 'HALF':
+        paras.append(f"**{name}** shows mixed signals across the framework. There are genuine positives here, but also flags that need resolution before committing significant capital. The data supports a cautious 4-6% position, with additional capital deployed only after the next quarterly results confirm improvement in the flagged areas.")
+    else:
+        paras.append(f"**{name}** fails critical checks in this framework. The data does not support deploying capital at this time, regardless of how attractive the stock may appear on other metrics. Monitor quarterly and re-evaluate when the specific issues flagged below improve.")
+
+    # Paragraph 2: What's working
+    positives = []
+    if roe and roe > 20:
+        positives.append(f"ROE of {roe}% indicates strong capital efficiency")
+    if cfo_pat and cfo_pat > 1.0:
+        positives.append(f"exceptional cash generation — cumulative CFO/PAT of {cfo_pat}x means the company generates more cash than it reports as profit")
+    elif cfo_pat and cfo_pat > 0.7:
+        positives.append(f"healthy cash conversion at {cfo_pat}x cumulative CFO/PAT")
+    if peg and not np.isnan(peg) and peg < 0.5:
+        positives.append(f"deeply undervalued on a growth-adjusted basis at PEG {peg}")
+    elif peg and not np.isnan(peg) and peg < 1.0:
+        positives.append(f"attractively valued at PEG {peg}")
+    if layer1.get('sales_cagr') and layer1['sales_cagr'] > 20:
+        positives.append(f"strong revenue growth at {layer1['sales_cagr']}% CAGR")
+    if ret_1y and ret_1y > 20:
+        positives.append(f"positive market sentiment with {ret_1y:+.1f}% 1Y return")
+
+    if positives:
+        paras.append("**What's working:** " + ", ".join(positives) + ".")
+
+    # Paragraph 3: What's concerning
+    concerns = []
+    if score < 70:
+        concerns.append(f"accounting quality score of {score}/100 with {acct.get('num_flags', 0)} flag(s)")
+    if peg and not np.isnan(peg) and peg > 2.0:
+        concerns.append(f"PEG of {peg} means the stock is overvalued relative to its growth")
+    if pe and pe > 80:
+        concerns.append(f"PE of {pe:.0f} triggers the Adani Filter — extremely high risk")
+    if cyclical.get('cyclical_peak'):
+        concerns.append(f"ROE at cyclical peak ({cyclical['latest_roe']}% vs normalized {cyclical['median_roe']}%) — current earnings may not be sustainable")
+    if ret_1y and ret_1y < -30:
+        concerns.append(f"stock down {abs(ret_1y):.0f}% in 1 year — the market is pricing in something negative")
+    if momentum.get('available'):
+        lq = momentum.get('latest_qoq', 0) or 0
+        pq = momentum.get('prior_qoq', 0) or 0
+        if lq < 0 and pq < 0:
+            concerns.append(f"two consecutive quarters of declining EPS ({lq:+.1f}% and {pq:+.1f}% QoQ)")
+    for flag in acct.get('flags', [])[:2]:
+        concerns.append(flag.lower())
+
+    if concerns:
+        paras.append("**What needs attention:** " + ", ".join(concerns) + ".")
+
+    # Paragraph 4: Action
+    if tier == 'FULL':
+        paras.append(f"**Action:** Deploy 12-15% of portfolio. Read the latest concall transcript to confirm management guidance aligns with what the numbers show.")
+    elif tier == 'STANDARD':
+        paras.append(f"**Action:** Position at 8-10%. This is a hold-and-compound stock, not a trade. Re-evaluate sizing after next quarterly results.")
+    elif tier == 'HALF':
+        paras.append(f"**Action:** Half position at 4-6% only. Wait for Q2 results to see if the flagged issues improve before adding more capital.")
+    else:
+        paras.append(f"**Action:** Do not buy. Add to quarterly watchlist and re-screen when the next results are published. The specific flags above need to improve before this stock deserves capital.")
+
+    return "\n\n".join(paras)
 
 
 # ============================================================
-# BATCH ANALYSIS FOR TOP 10
+# BATCH SCREENER
 # ============================================================
-def analyse_single_stock_quick(ticker_str):
-    """Quick analysis for batch screening — returns a summary dict."""
+def analyse_quick(ticker_str):
     try:
         data = fetch_stock_data(ticker_str)
         if not data or not data['info']:
             return None
-
         info = data['info']
-        fin = data['financials']
-        bs = data['balance_sheet']
-        cf = data['cashflow']
-
-        # Skip banking stocks
         if is_banking_stock(info):
             return None
 
-        # Layer 1
-        layer1 = run_layer1(info, fin, bs)
-
-        # Skip if fails basic Phase I (except growth — some compounders have lumpy growth in yfinance)
+        layer1 = run_layer1(info, data['financials'], data['balance_sheet'])
         if not layer1['mcap_pass'] or not layer1['de_pass']:
             return None
-        if layer1['roe'] is not None and layer1['roe'] < 12:
+        if layer1['roe'] is not None and layer1['roe'] < 15:
             return None
 
-        # Accounting quality
-        multi_year = get_multi_year_data(fin, bs, cf)
-        if not multi_year:
+        multi = get_multi_year_data(data['financials'], data['balance_sheet'], data['cashflow'])
+        if not multi:
             return None
-        acct = run_accounting_quality(multi_year)
-        cyclical = run_cyclical_check(multi_year)
-
-        # PEG
+        acct = run_accounting_quality(multi)
+        cyc = run_cyclical_check(multi)
         peg = calc_peg(layer1.get('pe'), layer1.get('pat_cagr'))
-
-        # 1Y return
-        ret_1y = get_1y_return(ticker_str)
-
-        # Position sizing
-        tier, size = get_position_size(
-            acct['score'], acct['num_flags'],
-            cyclical.get('cyclical_peak', False),
-            peg, ret_1y
-        )
+        ret = get_1y_return(ticker_str)
+        tier, size = get_position_size(acct['score'], acct['num_flags'], cyc.get('cyclical_peak', False), peg, ret)
 
         return {
-            'ticker': ticker_str.replace('.NS', ''),
-            'name': info.get('shortName', ticker_str),
-            'sector': info.get('sector', 'N/A'),
-            'price': info.get('currentPrice', info.get('regularMarketPrice', None)),
-            'pe': layer1.get('pe'),
-            'peg': peg,
-            'roe': layer1.get('roe'),
-            'roce': layer1.get('roce'),
-            'acct_score': acct['score'],
-            'num_flags': acct['num_flags'],
-            'cum_cfo_pat': acct.get('cum_cfo_pat'),
-            'cyclical_peak': cyclical.get('cyclical_peak', False),
-            'ret_1y': ret_1y,
-            'tier': tier,
-            'size': size,
-            'sales_cagr': layer1.get('sales_cagr'),
-            'pat_cagr': layer1.get('pat_cagr'),
+            'ticker': ticker_str.replace('.NS', ''), 'name': info.get('shortName', ''),
+            'sector': info.get('sector', 'N/A'), 'price': info.get('currentPrice', info.get('regularMarketPrice')),
+            'pe': layer1.get('pe'), 'peg': peg, 'roe': layer1.get('roe'), 'roce': layer1.get('roce'),
+            'acct_score': acct['score'], 'num_flags': acct['num_flags'],
+            'cum_cfo_pat': acct.get('cum_cfo_pat'), 'cyclical_peak': cyc.get('cyclical_peak', False),
+            'ret_1y': ret, 'tier': tier, 'size': size,
+            'sales_cagr': layer1.get('sales_cagr'), 'pat_cagr': layer1.get('pat_cagr')
         }
     except:
         return None
@@ -641,385 +627,341 @@ st.markdown('<p class="main-header">📊 High Compounder Framework</p>', unsafe_
 st.markdown('<p class="sub-header">7-Layer Systematic Indian Equity Screener · Quality + Valuation + Momentum</p>', unsafe_allow_html=True)
 st.markdown("---")
 
-# ============================================================
-# SIDEBAR
-# ============================================================
-st.sidebar.title("Navigation")
-page = st.sidebar.radio("", ["🔍 Single Stock Analysis", "🏆 Auto Top 10 Screener", "📖 How It Works"], label_visibility="collapsed")
-
+st.sidebar.title("Navigate")
+page = st.sidebar.radio("", ["🔍 Single Stock", "🏆 Auto Top 10", "📖 How It Works"], label_visibility="collapsed")
 st.sidebar.markdown("---")
-st.sidebar.markdown("### Current Portfolio")
-portfolio_data = {
-    "Stock": ["LUPIN", "DIXON", "ENRIN", "BSE", "MCX", "ICICI AMC", "EICHER", "KPIT", "POLYCAB", "HDFC AMC"],
-    "Tier": ["FULL", "FULL", "FULL", "STD", "STD", "STD", "STD", "HALF", "HALF", "HALF"],
-    "Score": [100, 100, 100, 85, 85, 85, 85, 100, 55, 70],
-    "PEG": [0.14, 0.54, 0.91, 0.38, 0.51, 1.46, 1.60, 1.48, 1.67, 1.42]
-}
-st.sidebar.dataframe(pd.DataFrame(portfolio_data), hide_index=True, use_container_width=True)
+st.sidebar.markdown("### Portfolio")
+st.sidebar.dataframe(pd.DataFrame({
+    "Stock": ["LUPIN","DIXON","ENRIN","BSE","MCX","ICICI AMC","EICHER","KPIT","POLYCAB","HDFC AMC"],
+    "Tier": ["FULL","FULL","FULL","STD","STD","STD","STD","HALF","HALF","HALF"],
+    "Score": [100,100,100,85,85,85,85,100,55,70],
+    "PEG": [0.14,0.54,0.91,0.38,0.51,1.46,1.60,1.48,1.67,1.42]
+}), hide_index=True, use_container_width=True)
 st.sidebar.markdown("---")
-st.sidebar.caption("Built by Vinayak Nagral · Data from Yahoo Finance · For research only")
+st.sidebar.caption("Built by Vinayak Nagral · Sep 2026")
 
 
 # ============================================================
-# PAGE 1: SINGLE STOCK ANALYSIS
+# PAGE 1: SINGLE STOCK
 # ============================================================
-if page == "🔍 Single Stock Analysis":
-
-    col_input, col_btn = st.columns([3, 1])
-    with col_input:
-        ticker_input = st.text_input("Enter NSE ticker", value="LUPIN", placeholder="e.g., LUPIN, BSE, DIXON, TCS").strip().upper()
-    with col_btn:
+if page == "🔍 Single Stock":
+    c1, c2 = st.columns([3,1])
+    with c1:
+        ticker_input = st.text_input("Enter NSE ticker", value="LUPIN", placeholder="LUPIN, BSE, DIXON, TCS, HCLTECH").strip().upper()
+    with c2:
         st.markdown("<br>", unsafe_allow_html=True)
-        analyse_btn = st.button("🔍 Run Analysis", type="primary", use_container_width=True)
+        go = st.button("🔍 Analyse", type="primary", use_container_width=True)
 
-    quick_picks = st.columns(7)
-    quick_tickers = ["LUPIN", "BSE", "DIXON", "KPITTECH", "HDFCAMC", "MAZDOCK", "WAAREEENER"]
-    for i, qt in enumerate(quick_tickers):
-        with quick_picks[i]:
-            if st.button(qt, key=f"quick_{qt}", use_container_width=True):
+    qcols = st.columns(7)
+    for i, qt in enumerate(["LUPIN","BSE","DIXON","KPITTECH","HDFCAMC","MAZDOCK","HCLTECH"]):
+        with qcols[i]:
+            if st.button(qt, key=f"q_{qt}", use_container_width=True):
                 ticker_input = qt
-                analyse_btn = True
+                go = True
 
     if not ticker_input.endswith(".NS"):
-        ticker_input = ticker_input + ".NS"
+        ticker_input += ".NS"
 
-    if analyse_btn:
-        with st.spinner(f"Analysing {ticker_input}..."):
-            stock_data = fetch_stock_data(ticker_input)
-
-        if stock_data is None:
-            st.error("Could not fetch data. Check the ticker and try again.")
+    if go:
+        with st.spinner(f"Analysing {ticker_input.replace('.NS','')}..."):
+            sd = fetch_stock_data(ticker_input)
+        if not sd:
+            st.error("Could not fetch data. Check ticker.")
             st.stop()
 
-        info = stock_data['info']
-        fin = stock_data['financials']
-        bs = stock_data['balance_sheet']
-        cf = stock_data['cashflow']
-        qfin = stock_data['quarterly_financials']
-
-        company_name = info.get('shortName', ticker_input)
+        info = sd['info']
+        fin, bs, cf, qfin = sd['financials'], sd['balance_sheet'], sd['cashflow'], sd['quarterly_financials']
+        name = info.get('shortName', ticker_input)
         sector = info.get('sector', 'N/A')
         price = info.get('currentPrice', info.get('regularMarketPrice', 'N/A'))
-        is_bank = is_banking_stock(info, company_name)
+        is_bank = is_banking_stock(info, name)
 
-        st.markdown(f"## {company_name}")
+        st.markdown(f"## {name}")
         st.markdown(f"**{ticker_input}** · {sector} · ₹{price}")
 
         if is_bank:
-            st.markdown('<div class="banking-warning">⚠️ <strong>Banking/Financial Stock Detected.</strong> This framework is designed for non-financial companies. Banks, NBFCs, and insurance companies require different metrics (NIM, CASA, Credit Cost, GNPA). The scores below are shown for reference but should not drive investment decisions for this stock.</div>', unsafe_allow_html=True)
+            st.markdown('<div class="banking-box">⚠️ <strong>Banking/Financial Stock.</strong> This framework is designed for non-financial companies. Banks need NIM, CASA, Credit Cost, GNPA metrics. Scores shown for reference only.</div>', unsafe_allow_html=True)
 
         st.markdown("---")
 
-        # Run all layers
-        with st.spinner("Running 7-layer analysis..."):
+        with st.spinner("Running all 7 layers..."):
             layer1 = run_layer1(info, fin, bs)
-            multi_year = get_multi_year_data(fin, bs, cf)
-            if multi_year:
-                acct = run_accounting_quality(multi_year)
-                cyclical = run_cyclical_check(multi_year)
-            else:
-                acct = {'score': None, 'flags': ['Insufficient data'], 'num_flags': 0, 'cum_cfo_pat': None, 'cum_cfo_ebitda': None}
-                cyclical = {'cyclical_peak': False, 'roe_by_year': {}}
-
+            multi = get_multi_year_data(fin, bs, cf)
+            acct = run_accounting_quality(multi) if multi else {'score': None, 'flags': ['Insufficient data'], 'num_flags': 0, 'cum_cfo_pat': None, 'cum_cfo_ebitda': None}
+            cyclical = run_cyclical_check(multi) if multi else {'cyclical_peak': False, 'roe_by_year': {}}
             peg = calc_peg(layer1.get('pe'), layer1.get('pat_cagr'))
             momentum = run_momentum_check(qfin)
             ret_1y = get_1y_return(ticker_input)
+            tier, size = get_position_size(acct['score'], acct['num_flags'], cyclical.get('cyclical_peak', False), peg, ret_1y) if acct.get('score') is not None else ('N/A', 'Insufficient data')
 
-            if acct.get('score') is not None:
-                tier, size = get_position_size(acct['score'], acct['num_flags'], cyclical.get('cyclical_peak', False), peg, ret_1y)
-            else:
-                tier, size = 'N/A', 'Insufficient data'
-
-        # ---- TOP METRICS ----
-        col1, col2, col3, col4, col5, col6 = st.columns(6)
-        with col1:
-            st.metric("Acct Score", f"{acct.get('score', 'N/A')}/100")
-        with col2:
-            st.metric("PE", f"{layer1['pe']:.1f}" if layer1.get('pe') else "N/A")
-        with col3:
-            st.metric("PEG", f"{peg:.2f}" if peg else "N/A")
-        with col4:
-            st.metric("ROE", f"{layer1['roe']}%" if layer1.get('roe') else "N/A")
-        with col5:
-            st.metric("1Y Return", f"{ret_1y:+.1f}%" if ret_1y is not None else "N/A")
-        with col6:
-            tier_class = f"tier-{tier.lower()}" if tier in ['FULL', 'STANDARD', 'HALF', 'WATCH'] else ""
+        # METRICS ROW
+        m1, m2, m3, m4, m5, m6 = st.columns(6)
+        m1.metric("Score", f"{acct.get('score', 'N/A')}/100")
+        m2.metric("PE", safe_fmt(layer1.get('pe'), '.1f'))
+        m3.metric("PEG", safe_fmt(peg, '.2f'))
+        m4.metric("ROE", safe_fmt(layer1.get('roe'), '.1f', '%'))
+        m5.metric("1Y Return", safe_fmt(ret_1y, '+.1f', '%'))
+        with m6:
             st.markdown("**Tier**")
-            st.markdown(f'<p class="{tier_class}">{tier} — {size}</p>', unsafe_allow_html=True)
-
-        # ---- VERDICT BOX ----
-        verdict_text = generate_verdict(company_name, tier, size, layer1, acct, cyclical, peg, ret_1y, momentum, is_bank)
-        if tier == 'FULL':
-            box_class = "verdict-buy"
-        elif tier in ['STANDARD', 'HALF']:
-            box_class = "verdict-hold"
-        else:
-            box_class = "verdict-avoid"
-        st.markdown(f'<div class="verdict-box {box_class}">{verdict_text}</div>', unsafe_allow_html=True)
+            tc = f"tier-{tier.lower()}" if tier in ['FULL','STANDARD','HALF','WATCH'] else ""
+            st.markdown(f'<p class="{tc}">{tier} — {size}</p>', unsafe_allow_html=True)
 
         st.markdown("---")
 
-        # ---- TABS ----
-        tab1, tab2, tab3, tab4, tab5 = st.tabs(["📋 Fundamentals", "🔍 Forensic Accounting", "📊 Cyclical & Valuation", "📈 Momentum", "🎯 Summary"])
+        # LAYER-BY-LAYER BREAKDOWN
+        st.subheader("Layer-by-Layer Breakdown")
+        layers = generate_layer_breakdown(layer1, acct, cyclical, peg, momentum, ret_1y, is_bank)
+        for lname, status, detail in layers:
+            css = "layer-pass" if status == "pass" else "layer-fail" if status == "fail" else "layer-warn"
+            icon = "✅" if status == "pass" else "❌" if status == "fail" else "⚠️"
+            st.markdown(f'<div class="{css}">{icon} <strong>{lname}:</strong> {detail}</div>', unsafe_allow_html=True)
+
+        st.markdown("---")
+
+        # VERDICT
+        st.subheader("Investment Verdict")
+        verdict = generate_verdict_text(name, tier, size, layer1, acct, cyclical, peg, ret_1y, momentum, is_bank)
+        st.markdown(f'<div class="verdict-section">{verdict}</div>', unsafe_allow_html=True)
+
+        # DETAILED TABS
+        st.markdown("---")
+        tab1, tab2, tab3, tab4 = st.tabs(["🔍 Forensic Detail", "📊 Cyclical & Valuation", "📈 Momentum", "📋 Raw Data"])
 
         with tab1:
-            st.subheader("Phase I: Quantitative Core Screen")
-            checks = {
-                f"Market Cap: ₹{layer1.get('market_cap_cr', 0):,.0f} Cr": layer1['mcap_pass'],
-                f"Debt/Equity: {layer1.get('debt_to_equity', 'N/A')}": layer1['de_pass'],
-                f"ROE: {layer1.get('roe', 'N/A')}% (threshold: >15%)": layer1['roe_pass'],
-                f"ROCE: {layer1.get('roce', 'N/A')}% (threshold: >18%)": layer1['roce_pass'],
-                f"Sales CAGR: {layer1.get('sales_cagr', 'N/A')}%, PAT CAGR: {layer1.get('pat_cagr', 'N/A')}% (threshold: >15%)": layer1['growth_pass'],
-            }
-            for check, passed in checks.items():
-                st.markdown(f"{'✅' if passed else '❌'} {check}")
-            color = "green" if layer1['phase1_pass'] else "red"
-            st.markdown(f"**Overall: :{color}[{'PASSES' if layer1['phase1_pass'] else 'FAILS'} Phase I]**")
-
-        with tab2:
-            st.subheader("Forensic Accounting Quality")
             if acct.get('score') is not None:
-                score = acct['score']
-                if score >= 85:
-                    st.markdown(f'<div class="score-box score-green"><h2>{score}/100</h2><p>CLEAN — No material concerns</p></div>', unsafe_allow_html=True)
-                elif score >= 50:
-                    st.markdown(f'<div class="score-box score-yellow"><h2>{score}/100</h2><p>FLAGS DETECTED — Investigate before buying</p></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="score-box score-red"><h2>{score}/100</h2><p>SERIOUS CONCERNS — Do not deploy capital</p></div>', unsafe_allow_html=True)
+                sc = acct['score']
+                css = "score-green" if sc >= 85 else "score-yellow" if sc >= 50 else "score-red"
+                label = "CLEAN" if sc >= 85 else "FLAGS DETECTED" if sc >= 50 else "SERIOUS CONCERNS"
+                st.markdown(f'<div class="score-box {css}"><h2>{sc}/100</h2><p>{label}</p></div>', unsafe_allow_html=True)
 
-                col_a, col_b = st.columns(2)
-                with col_a:
+                ca, cb = st.columns(2)
+                with ca:
                     st.markdown("**Cumulative CFO/PAT**")
-                    val = acct.get('cum_cfo_pat')
-                    if val is not None:
-                        icon = "✅" if val >= 0.7 else "⚠️" if val >= 0.5 else "❌"
-                        st.markdown(f"{icon} **{val}x** {'(healthy)' if val >= 0.7 else '(weak)' if val >= 0.5 else '(critical)'}")
-                    single = acct.get('single_yr_cfo_pat')
-                    if single is not None:
-                        st.caption(f"Latest single year: {single}x (context only)")
-
-                with col_b:
+                    v = acct.get('cum_cfo_pat')
+                    if v is not None:
+                        st.markdown(f"{'✅' if v >= 0.7 else '⚠️' if v >= 0.5 else '❌'} **{v}x** {'(healthy)' if v >= 0.7 else '(weak)' if v >= 0.5 else '(critical)'}")
+                    sv = acct.get('single_yr_cfo_pat')
+                    if sv is not None:
+                        st.caption(f"Latest single year: {sv}x")
+                with cb:
                     st.markdown("**Cumulative CFO/EBITDA**")
-                    val = acct.get('cum_cfo_ebitda')
-                    if val is not None:
-                        icon = "✅" if val >= 0.7 else "⚠️" if val >= 0.5 else "❌"
-                        st.markdown(f"{icon} **{val}x** {'(healthy)' if val >= 0.7 else '(weak)' if val >= 0.5 else '(critical)'}")
-                    trend = acct.get('cfo_ebitda_trend', [])
-                    if trend:
-                        st.caption(f"Trend: {' → '.join(str(x) for x in trend)}")
+                    v = acct.get('cum_cfo_ebitda')
+                    if v is not None:
+                        st.markdown(f"{'✅' if v >= 0.7 else '⚠️' if v >= 0.5 else '❌'} **{v}x** {'(healthy)' if v >= 0.7 else '(weak)' if v >= 0.5 else '(critical)'}")
+                    t = acct.get('cfo_ebitda_trend', [])
+                    if t: st.caption(f"Trend: {' → '.join(str(x) for x in t)}")
 
                 if acct['flags']:
-                    st.markdown("**Flags:**")
-                    for flag in acct['flags']:
-                        st.markdown(f'<div class="flag-item">⚠ {flag}</div>', unsafe_allow_html=True)
+                    for f in acct['flags']:
+                        st.markdown(f'<div class="flag-item">⚠ {f}</div>', unsafe_allow_html=True)
                 else:
-                    st.markdown(f'<div class="clean-item">✅ All forensic checks passed</div>', unsafe_allow_html=True)
+                    st.markdown('<div class="clean-item">✅ All forensic checks passed</div>', unsafe_allow_html=True)
 
                 recv = acct.get('recv_pcts', [])
-                years = acct.get('recv_years', [])
+                yrs = acct.get('recv_years', [])
                 if recv and any(r is not None for r in recv):
                     st.markdown("**Receivables % of Revenue:**")
-                    st.dataframe(pd.DataFrame({'Year': years, 'Recv %': [f"{r:.1f}%" if r else "N/A" for r in recv]}), hide_index=True, use_container_width=True)
+                    st.dataframe(pd.DataFrame({'Year': yrs, 'Recv%': [f"{r:.1f}%" if r else "N/A" for r in recv]}), hide_index=True, use_container_width=True)
 
-        with tab3:
-            col_c, col_d = st.columns(2)
-            with col_c:
+        with tab2:
+            cc, cd = st.columns(2)
+            with cc:
                 st.subheader("Cyclical ROE")
                 if cyclical.get('roe_by_year'):
-                    st.dataframe(pd.DataFrame(list(cyclical['roe_by_year'].items()), columns=['Year', 'ROE %']), hide_index=True, use_container_width=True)
-                    st.markdown(f"Latest: **{cyclical.get('latest_roe')}%** · Avg: **{cyclical.get('avg_roe')}%** · Normalized: **{cyclical.get('median_roe')}%**")
-                    if cyclical.get('cyclical_peak'):
-                        st.error("⚠️ CYCLICAL PEAK — Use normalized ROE for valuation")
-                    else:
-                        st.success("✅ Not at cyclical peak")
-
-            with col_d:
+                    st.dataframe(pd.DataFrame(list(cyclical['roe_by_year'].items()), columns=['Year','ROE%']), hide_index=True, use_container_width=True)
+                    st.markdown(f"Latest **{cyclical.get('latest_roe')}%** · Avg **{cyclical.get('avg_roe')}%** · Normalized **{cyclical.get('median_roe')}%**")
+                    if cyclical.get('cyclical_peak'): st.error("⚠️ CYCLICAL PEAK")
+                    else: st.success("✅ Not at peak")
+            with cd:
                 st.subheader("Valuation")
-                st.markdown(f"**PE:** {layer1.get('pe', 'N/A')} · **PEG:** {peg if peg else 'N/A'}")
-                if peg:
-                    if peg < 0.5: st.success(f"PEG {peg} — Undervalued")
-                    elif peg < 1.0: st.success(f"PEG {peg} — Attractive")
-                    elif peg < 1.5: st.info(f"PEG {peg} — Fairly valued")
-                    elif peg < 2.0: st.warning(f"PEG {peg} — Expensive")
-                    else: st.error(f"PEG {peg} — Overvalued")
-                if layer1.get('pe') and layer1['pe'] > 80:
-                    st.error("🚨 ADANI FILTER: PE > 80")
-                st.markdown(f"**Sales CAGR:** {layer1.get('sales_cagr', 'N/A')}% · **PAT CAGR:** {layer1.get('pat_cagr', 'N/A')}%")
+                st.markdown(f"**PE:** {safe_fmt(layer1.get('pe'), '.1f')} · **PEG:** {safe_fmt(peg, '.2f')}")
+                if peg and not np.isnan(peg):
+                    if peg < 0.5: st.success(f"PEG {peg:.2f} — Undervalued")
+                    elif peg < 1.0: st.success(f"PEG {peg:.2f} — Attractive")
+                    elif peg < 1.5: st.info(f"PEG {peg:.2f} — Fair")
+                    elif peg < 2.0: st.warning(f"PEG {peg:.2f} — Expensive")
+                    else: st.error(f"PEG {peg:.2f} — Overvalued")
+                if pe and pe > 80: st.error("🚨 ADANI FILTER: PE > 80")
+                st.markdown(f"**Sales CAGR:** {safe_fmt(layer1.get('sales_cagr'), '.1f')}% · **PAT CAGR:** {safe_fmt(layer1.get('pat_cagr'), '.1f')}%")
 
-        with tab4:
-            st.subheader("Earnings Momentum")
+        with tab3:
             if momentum.get('available'):
                 mc1, mc2 = st.columns(2)
-                with mc1:
-                    st.metric("Latest QoQ", f"{momentum['latest_qoq']:+.1f}%" if momentum.get('latest_qoq') is not None else "N/A")
-                with mc2:
-                    st.metric("Prior QoQ", f"{momentum['prior_qoq']:+.1f}%" if momentum.get('prior_qoq') is not None else "N/A")
-
+                mc1.metric("Latest QoQ", safe_fmt(momentum.get('latest_qoq'), '+.1f', '%'))
+                mc2.metric("Prior QoQ", safe_fmt(momentum.get('prior_qoq'), '+.1f', '%'))
                 if momentum.get('eps_values') and momentum.get('quarters'):
-                    st.dataframe(pd.DataFrame({'Quarter': momentum['quarters'], 'EPS': [round(e, 2) for e in momentum['eps_values']]}), hide_index=True, use_container_width=True)
-
-                lq = momentum.get('latest_qoq', 0) or 0
-                pq = momentum.get('prior_qoq', 0) or 0
-                if lq > 0 and pq > 0: st.success("✅ Both quarters positive — momentum confirmed")
-                elif lq > 0 or pq > 0: st.info("Mixed momentum. Monitor next quarter.")
-                else: st.warning("⚠️ Both quarters negative — investigate before buying")
+                    st.dataframe(pd.DataFrame({'Quarter': momentum['quarters'], 'EPS': [round(e,2) for e in momentum['eps_values']]}), hide_index=True, use_container_width=True)
             else:
-                st.warning("Insufficient quarterly data.")
+                st.warning("Insufficient quarterly data")
             if ret_1y is not None:
-                st.markdown(f"**1-Year Price Return:** {ret_1y:+.1f}%")
+                st.markdown(f"**1Y Price Return:** {ret_1y:+.1f}%")
 
-        with tab5:
-            st.subheader("All 7 Layers")
+        with tab4:
+            st.subheader("All Layers Summary")
             st.dataframe(pd.DataFrame({
-                "Layer": ["1. Fundamentals", "2. Cash Flow", "3. Forensic", "4. PEG", "5. Momentum", "6. Cyclical", "7. Sizing"],
+                "Layer": ["Fundamentals","Cash Flow","Forensic","PEG","Momentum","Cyclical","Sizing"],
                 "Result": [
                     "PASS ✅" if layer1['phase1_pass'] else "FAIL ❌",
-                    f"CFO/PAT: {acct.get('cum_cfo_pat', 'N/A')}x",
-                    f"{acct.get('score', 'N/A')}/100 ({acct.get('num_flags', 0)} flags)",
-                    f"PEG: {peg}" if peg else "N/A",
-                    f"QoQ: {momentum.get('latest_qoq', 'N/A')}%" if momentum.get('available') else "N/A",
+                    f"CFO/PAT: {safe_fmt(acct.get('cum_cfo_pat'),'.2f')}x",
+                    f"{acct.get('score','N/A')}/100 ({acct.get('num_flags',0)} flags)",
+                    safe_fmt(peg, '.2f'),
+                    f"QoQ: {safe_fmt(momentum.get('latest_qoq'),'+.1f')}%" if momentum.get('available') else "N/A",
                     "PEAK ⚠️" if cyclical.get('cyclical_peak') else "OK ✅",
                     f"{tier} — {size}"
                 ]
             }), hide_index=True, use_container_width=True)
 
-        st.markdown("---")
         st.caption("For research only, not investment advice · Data from Yahoo Finance")
 
 
 # ============================================================
-# PAGE 2: AUTO TOP 10 SCREENER
+# PAGE 2: AUTO TOP 10
 # ============================================================
-elif page == "🏆 Auto Top 10 Screener":
+elif page == "🏆 Auto Top 10":
+    st.subheader("🏆 Automatic Top 10 Picker")
+    st.markdown("Screens Nifty 200 through all 7 layers. Banking/insurance auto-excluded.")
 
-    st.subheader("🏆 Automatic Top 10 Stock Picker")
-    st.markdown("Screens Nifty 200 through all 7 layers and ranks by combined quality + valuation score. Banking and insurance stocks are automatically excluded.")
-
-    col_config1, col_config2 = st.columns(2)
-    with col_config1:
-        max_stocks = st.slider("How many stocks to screen", 20, 200, 50, step=10, help="More stocks = more thorough but slower. 50 takes ~5 min, 200 takes ~20 min.")
-    with col_config2:
-        top_n = st.slider("Show top N picks", 5, 20, 10)
+    c1, c2 = st.columns(2)
+    with c1: max_stocks = st.slider("Stocks to screen", 20, 200, 50, 10, help="50 ≈ 5 min, 200 ≈ 20 min")
+    with c2: top_n = st.slider("Show top N", 5, 20, 10)
 
     if st.button("🚀 Run Full Screen", type="primary", use_container_width=True):
-
-        tickers = fetch_nifty200_tickers()
+        tickers = fetch_nifty200_tickers()[:max_stocks]
         if not tickers:
-            st.error("Could not fetch Nifty 200 list. Check your connection.")
+            st.error("Could not fetch Nifty 200.")
             st.stop()
 
-        tickers = tickers[:max_stocks]
         results = []
-        progress = st.progress(0, text="Starting screen...")
-
-        for i, ticker in enumerate(tickers):
-            progress.progress((i + 1) / len(tickers), text=f"Analysing {ticker.replace('.NS', '')} ({i+1}/{len(tickers)})")
-            result = analyse_single_stock_quick(ticker)
-            if result:
-                results.append(result)
-
-        progress.empty()
+        prog = st.progress(0, "Starting...")
+        for i, t in enumerate(tickers):
+            prog.progress((i+1)/len(tickers), f"Analysing {t.replace('.NS','')} ({i+1}/{len(tickers)})")
+            r = analyse_quick(t)
+            if r: results.append(r)
+        prog.empty()
 
         if not results:
-            st.error("No stocks passed the screening criteria.")
+            st.error("No stocks passed.")
             st.stop()
 
         df = pd.DataFrame(results)
 
-        # Composite ranking score: weighted combination
-        df['rank_score'] = 0.0
-        df['rank_score'] += df['acct_score'].fillna(0) * 0.35
-        df['rank_score'] += df['peg'].apply(lambda x: max(0, 100 - (x or 5) * 20) if x else 0) * 0.25
-        df['rank_score'] += df['roe'].fillna(0) * 0.15
-        df['rank_score'] += df['ret_1y'].apply(lambda x: min(50, max(-50, x or 0)) + 50).fillna(50) * 0.10
-        df['rank_score'] += df['cum_cfo_pat'].apply(lambda x: min(100, (x or 0) * 100)).fillna(0) * 0.15
+        def peg_score(x):
+            if x is None: return 10
+            try:
+                if np.isnan(x): return 10
+            except: pass
+            if x < 0.3: return 100
+            if x < 0.5: return 90
+            if x < 1.0: return 75
+            if x < 1.5: return 55
+            if x < 2.0: return 30
+            if x < 3.0: return 10
+            return 0
 
+        def mom_score(x):
+            if x is None: return 40
+            try:
+                if np.isnan(x): return 40
+            except: pass
+            if x > 30: return 80
+            if x > 0: return 65
+            if x > -20: return 40
+            if x > -40: return 20
+            return 5
+
+        def cfo_s(x):
+            if x is None: return 20
+            try:
+                if np.isnan(x): return 20
+            except: pass
+            if x > 1.2: return 100
+            if x > 0.9: return 85
+            if x > 0.7: return 65
+            if x > 0.5: return 40
+            return 10
+
+        df['rank_score'] = (
+            df['acct_score'].fillna(0) * 0.25 +
+            df['peg'].apply(peg_score) * 0.30 +
+            df['roe'].fillna(0) * 0.10 +
+            df['ret_1y'].apply(mom_score) * 0.15 +
+            df['cum_cfo_pat'].apply(cfo_s) * 0.20
+        )
         df = df.sort_values('rank_score', ascending=False)
         top = df.head(top_n)
 
-        # Display results
-        st.markdown(f"### Top {top_n} Picks from {len(tickers)} Screened Stocks")
-        st.markdown(f"*{len(results)} stocks passed initial filters. Banking/insurance excluded automatically.*")
-        st.markdown("")
+        st.markdown(f"### Top {top_n} from {len(tickers)} screened ({len(results)} passed filters)")
 
         for idx, row in top.iterrows():
             rank = list(top.index).index(idx) + 1
-            tier_color = {"FULL": "🟢", "STANDARD": "🔵", "HALF": "🟡", "WATCH": "🔴"}.get(row['tier'], "⚪")
+            tc = {"FULL":"🟢","STANDARD":"🔵","HALF":"🟡","WATCH":"🔴"}.get(row['tier'],"⚪")
+            peg_d = safe_fmt(row['peg'], '.2f')
 
-            with st.expander(f"**#{rank} · {row['ticker']}** — {row['name']} · {tier_color} {row['tier']} · Score: {row['acct_score']}/100 · PEG: {row['peg'] if row['peg'] else 'N/A'}", expanded=(rank <= 3)):
-                c1, c2, c3, c4, c5, c6 = st.columns(6)
+            with st.expander(f"**#{rank} · {row['ticker']}** — {row['name']} · {tc} {row['tier']} · Score {row['acct_score']}/100 · PEG {peg_d}", expanded=(rank <= 3)):
+                c1,c2,c3,c4,c5,c6 = st.columns(6)
                 c1.metric("Price", f"₹{row['price']:,.0f}" if row['price'] else "N/A")
-                c2.metric("PE", f"{row['pe']:.1f}" if row['pe'] else "N/A")
-                c3.metric("PEG", f"{row['peg']:.2f}" if row['peg'] else "N/A")
-                c4.metric("ROE", f"{row['roe']:.1f}%" if row['roe'] else "N/A")
-                c5.metric("1Y Return", f"{row['ret_1y']:+.1f}%" if row['ret_1y'] is not None else "N/A")
-                c6.metric("CFO/PAT", f"{row['cum_cfo_pat']:.2f}x" if row['cum_cfo_pat'] else "N/A")
-
-                st.markdown(f"**Sector:** {row['sector']} · **Sales CAGR:** {row['sales_cagr']}% · **PAT CAGR:** {row['pat_cagr']}% · **Flags:** {row['num_flags']} · **Cyclical Peak:** {'Yes ⚠️' if row['cyclical_peak'] else 'No'}")
+                c2.metric("PE", safe_fmt(row['pe'], '.1f'))
+                c3.metric("PEG", safe_fmt(row['peg'], '.2f'))
+                c4.metric("ROE", safe_fmt(row['roe'], '.1f', '%'))
+                c5.metric("1Y Ret", safe_fmt(row['ret_1y'], '+.1f', '%'))
+                c6.metric("CFO/PAT", safe_fmt(row['cum_cfo_pat'], '.2f', 'x'))
+                st.markdown(f"**Sector:** {row['sector']} · **Sales CAGR:** {safe_fmt(row['sales_cagr'], '.1f')}% · **PAT CAGR:** {safe_fmt(row['pat_cagr'], '.1f')}% · **Flags:** {row['num_flags']} · **Cyclical Peak:** {'Yes ⚠️' if row['cyclical_peak'] else 'No'}")
                 st.markdown(f"**Position:** {row['tier']} — {row['size']}")
 
-        # Summary table
         st.markdown("---")
-        st.markdown("### Full Rankings Table")
-        display_df = df[['ticker', 'name', 'acct_score', 'pe', 'peg', 'roe', 'cum_cfo_pat', 'ret_1y', 'tier', 'size']].copy()
-        display_df.columns = ['Ticker', 'Name', 'Score', 'PE', 'PEG', 'ROE%', 'CFO/PAT', '1Y Ret%', 'Tier', 'Size']
-        display_df = display_df.reset_index(drop=True)
-        display_df.index = display_df.index + 1
-        st.dataframe(display_df, use_container_width=True)
+        st.markdown("### Full Rankings")
+        dd = df[['ticker','name','acct_score','pe','peg','roe','cum_cfo_pat','ret_1y','tier','size']].copy()
+        dd['peg'] = dd['peg'].apply(lambda x: round(x,2) if pd.notna(x) else None)
+        dd['cum_cfo_pat'] = dd['cum_cfo_pat'].apply(lambda x: round(x,2) if pd.notna(x) else None)
+        dd.columns = ['Ticker','Name','Score','PE','PEG','ROE%','CFO/PAT','1Y Ret%','Tier','Size']
+        dd = dd.reset_index(drop=True)
+        dd.index += 1
+        st.dataframe(dd, use_container_width=True)
 
-        # Tier breakdown
         st.markdown("### Tier Breakdown")
-        tc1, tc2, tc3, tc4 = st.columns(4)
-        for col_widget, tier_name, emoji in [(tc1, 'FULL', '🟢'), (tc2, 'STANDARD', '🔵'), (tc3, 'HALF', '🟡'), (tc4, 'WATCH', '🔴')]:
-            tier_stocks = df[df['tier'] == tier_name]
-            with col_widget:
-                st.markdown(f"**{emoji} {tier_name}** ({len(tier_stocks)})")
-                for _, r in tier_stocks.iterrows():
-                    st.caption(f"{r['ticker']} · Score {r['acct_score']}")
+        tc1,tc2,tc3,tc4 = st.columns(4)
+        for cw, tn, em in [(tc1,'FULL','🟢'),(tc2,'STANDARD','🔵'),(tc3,'HALF','🟡'),(tc4,'WATCH','🔴')]:
+            ts = df[df['tier']==tn]
+            with cw:
+                st.markdown(f"**{em} {tn}** ({len(ts)})")
+                for _,r in ts.iterrows():
+                    st.caption(f"{r['ticker']} · {r['acct_score']}")
 
 
 # ============================================================
 # PAGE 3: HOW IT WORKS
 # ============================================================
 elif page == "📖 How It Works":
-
     st.subheader("How This Framework Works")
-
     st.markdown("""
-    This dashboard runs a **7-layer systematic analysis** on any NSE-listed stock, designed to find high-quality compounders while avoiding value traps.
+This dashboard runs a **7-layer systematic analysis** on any NSE-listed stock, designed to find high-quality compounders while avoiding value traps.
 
-    **Layer 1 — Quantitative Screen:** Market Cap > ₹15,000 Cr, ROE > 15%, ROCE > 18%, D/E < 0.5, 3Y Sales & PAT CAGR > 15%. Filters the Nifty 500 from hundreds of stocks to a manageable shortlist.
+**Layer 1 — Quantitative Screen:** Market Cap > ₹15,000 Cr, ROE > 15%, ROCE > 18%, D/E < 0.5, 3Y Sales & PAT CAGR > 15%. Filters the Nifty 200 to a manageable shortlist.
 
-    **Layer 2 — Cash Flow Quality:** CFO/EBITDA > 70%. Ensures reported profits are generating actual cash, not just accounting entries.
+**Layer 2 — Cash Flow Quality:** CFO/EBITDA > 70%. Ensures reported profits generate actual cash.
 
-    **Layer 3 — Forensic Accounting (the key differentiator):** Four checks using **cumulative multi-year** data, not single-year snapshots. This smooths out lumpiness in project-based and hyper-growth businesses while still catching genuine accounting problems. Checks: receivables stuffing, inventory bloat, cumulative CFO/PAT, and cumulative CFO/EBITDA with trend analysis.
+**Layer 3 — Forensic Accounting:** Four checks using **cumulative multi-year** data (not single-year). Catches receivables stuffing, inventory bloat, and fake profits that single-year ratios miss.
 
-    **Layer 4 — PEG Valuation:** PE divided by earnings growth rate. A stock can have a high PE and still be cheap if growth justifies it. The "Adani Filter" flags any stock with PE > 80 as high risk.
+**Layer 4 — PEG Valuation:** PE ÷ earnings growth. A stock can have a high PE and still be cheap if growth justifies it. "Adani Filter" flags PE > 80 as high risk.
 
-    **Layer 5 — Earnings Momentum:** Last 2 quarters of QoQ EPS change. Catches stocks that pass every backward-looking test but have a fresh warning sign in the most recent data.
+**Layer 5 — Earnings Momentum:** Last 2 quarters QoQ EPS change. Catches stocks that pass backward-looking tests but show fresh deterioration.
 
-    **Layer 6 — Cyclical ROE Normalization:** If current ROE is more than 2x the historical average, the stock is at "cyclical peak" — use the median ROE for valuation models, not the inflated current figure.
+**Layer 6 — Cyclical ROE Normalization:** If current ROE > 2x historical average, the stock is at "cyclical peak." Use median ROE for valuation, not the inflated current figure.
 
-    **Layer 7 — Position Sizing v2:** Integrates quality score + PEG + 1Y momentum into a single sizing decision. Clean cash + cheap valuation = FULL (12-15%). Clean but expensive = STANDARD (8-10%). Flags present = HALF (4-6%). Failed quality = WATCH (0%).
+**Layer 7 — Position Sizing v2:** Integrates quality + PEG + momentum. Clean + cheap = FULL (12-15%). Clean + expensive = STANDARD (8-10%). Flags present = HALF (4-6%). Failed quality = WATCH (0%).
+
+---
+
+### What This Framework Does NOT Cover
+
+**Banking, NBFC, Insurance stocks** need NIM, CASA, Credit Cost, GNPA metrics. Auto-detected and flagged.
+
+**Commodity producers** where revenue is price-driven. CAGR filter creates false signals across cycles.
+
+---
+
+### Framework Score: 90/100
+
+The remaining 10 points require point-in-time backtesting (paid data), management quality scoring, and a separate financials framework.
     """)
-
-    st.markdown("---")
-    st.markdown("### What This Framework Does NOT Cover")
-    st.markdown("""
-    **Banking, NBFC, and Insurance stocks** require different metrics (NIM, CASA, Credit Cost, GNPA/NNPA, Provision Coverage). This framework automatically detects and flags these stocks.
-
-    **Commodity producers** where revenue is primarily price-driven. The CAGR filter screens them in during upcycles and out during downcycles.
-
-    **Newly listed companies** with less than 2 years of financial history — not enough data for cumulative checks.
-    """)
-
-    st.markdown("---")
-    st.markdown("### Framework Scoring")
-    st.markdown("""
-    This framework scores **90/100** for a retail investor operating independently. The 7 layers cover quantitative screening, cash flow authenticity, forensic accounting, growth-adjusted valuation, earnings momentum, cyclical normalization, and integrated position sizing.
-
-    The remaining 10 points would require: point-in-time historical backtesting (needs paid data), management quality scoring (capital allocation track record), and a separate framework for financials.
-    """)
-
-    st.markdown("---")
-    st.caption("Built by Vinayak Nagral · Framework developed September 2026")
+    st.caption("Built by Vinayak Nagral · September 2026")
