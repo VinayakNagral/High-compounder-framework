@@ -119,21 +119,18 @@ def is_banking_stock(info, name=""):
 # DATA FETCHING
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_1y_return(ticker_str):
+def fetch_stock_data(ticker_str):
     try:
         t = yf.Ticker(ticker_str)
-        hist = t.history(period="2y")
-        if hist.empty or len(hist) < 200:
-            return None
-        current = float(hist['Close'].iloc[-1])
-        target_date = datetime.now() - timedelta(days=365)
-        mask = hist.index <= target_date
-        if mask.sum() > 0:
-            past = float(hist.loc[mask, 'Close'].iloc[-1])
-            return round((current / past - 1) * 100, 1)
+        info = dict(t.info) if t.info else {}
+        fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
+        bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
+        cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
+        qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
+        return {"info": info, "financials": fin, "balance_sheet": bs, "cashflow": cf, "quarterly_financials": qfin}
     except:
-        pass
-    return None
+        return None
+
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_1y_return(ticker_str):
@@ -493,7 +490,7 @@ def generate_layer_breakdown(layer1, acct, cyclical, peg, momentum, ret_1y, is_b
         layers.append(("Cyclical ROE", "pass", f"Not at cyclical peak. Latest ROE {cyclical.get('latest_roe', 'N/A')}%, normalized {cyclical.get('median_roe', 'N/A')}%"))
 
     # 1Y Return context
-    if ret_1y is not None and not (isinstance(ret_1y, float) and np.isnan(ret_1y)):
+    if ret_1y is not None:
         if ret_1y > 30:
             layers.append(("Price Momentum", "pass", f"Stock up {ret_1y:+.1f}% in 1 year — strong market sentiment"))
         elif ret_1y > 0:
@@ -795,7 +792,7 @@ if page == "Single Stock":
                     st.dataframe(pd.DataFrame({'Quarter': momentum['quarters'], 'EPS': [round(e,2) for e in momentum['eps_values']]}), hide_index=True, use_container_width=True)
             else:
                 st.warning("Insufficient quarterly data")
-            if ret_1y is not None and not (isinstance(ret_1y, float) and np.isnan(ret_1y)):
+            if ret_1y is not None:
                 st.markdown(f"**1Y Price Return:** {ret_1y:+.1f}%")
 
         with tab4:
