@@ -69,27 +69,25 @@ st.markdown("""
 # ============================================================
 # DATA FETCHING FUNCTIONS
 # ============================================================
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600, show_spinner=False)
 def fetch_stock_data(ticker_str):
     """Fetch all required data for a stock."""
     try:
         t = yf.Ticker(ticker_str)
-        info = t.info
-        fin = t.financials
-        bs = t.balance_sheet
-        cf = t.cashflow
-        qfin = t.quarterly_financials
+        info = dict(t.info) if t.info else {}
+        fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
+        bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
+        cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
+        qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
 
         return {
             "info": info,
             "financials": fin,
             "balance_sheet": bs,
             "cashflow": cf,
-            "quarterly_financials": qfin,
-            "ticker_obj": t
+            "quarterly_financials": qfin
         }
     except Exception as e:
-        st.error(f"Error fetching {ticker_str}: {e}")
         return None
 
 
