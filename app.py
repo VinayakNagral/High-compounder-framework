@@ -628,7 +628,7 @@ st.markdown('<p class="sub-header">7-Layer Systematic Indian Equity Screener · 
 st.markdown("---")
 
 st.sidebar.title("Navigate")
-    page = st.sidebar.radio("", ["Single Stock", "Auto Top 10", "Live Tracker", "How It Works"], label_visibility="collapsed")
+page = st.sidebar.radio("", ["Single Stock", "Auto Top 10", "Live Tracker", "How It Works"], label_visibility="collapsed")
 st.sidebar.markdown("### Portfolio")
 st.sidebar.dataframe(pd.DataFrame({
     "Stock": ["LUPIN","DIXON","ENRIN","BSE","MCX","ICICI AMC","EICHER","KPIT","POLYCAB","HDFC AMC"],
