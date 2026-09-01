@@ -395,13 +395,17 @@ def run_momentum_check(qfin):
 def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
     if acct_score < 50:
         return 'WATCH', '0% (monitor only)'
+    if peg is not None and not (isinstance(peg, float) and np.isnan(peg)):
+        if peg > 5.0:
+            return 'WATCH', '0% (PEG > 5, extremely overvalued)'
+        if peg > 3.0:
+            return 'HALF', '4-6% (PEG > 3, significantly overvalued)'
     if acct_score >= 85 and num_flags == 0 and not cyclical_peak:
         base = 'FULL'
     elif acct_score >= 70 and num_flags <= 1:
         base = 'STANDARD'
     else:
         base = 'HALF'
-
     if base == 'FULL' and (peg is None or (isinstance(peg, float) and np.isnan(peg))):
         return 'STANDARD', '8-10% (growth not measurable)'
     if base == 'FULL' and peg < 0.5:
@@ -411,7 +415,6 @@ def get_position_size(acct_score, num_flags, cyclical_peak, peg, momentum_1y):
     if base == 'FULL' and peg > 1.5:
         return 'STANDARD', '8-10% (valuation full)'
     return {'FULL': ('FULL', '12-15%'), 'STANDARD': ('STANDARD', '8-10%'), 'HALF': ('HALF', '4-6%')}[base]
-
 
 def calc_peg(pe, pat_cagr):
     if pe and pat_cagr and pat_cagr > 0:
@@ -490,7 +493,7 @@ def generate_layer_breakdown(layer1, acct, cyclical, peg, momentum, ret_1y, is_b
         layers.append(("Cyclical ROE", "pass", f"Not at cyclical peak. Latest ROE {cyclical.get('latest_roe', 'N/A')}%, normalized {cyclical.get('median_roe', 'N/A')}%"))
 
     # 1Y Return context
-    if ret_1y is not None:
+ if ret_1y is not None and not (isinstance(ret_1y, float) and np.isnan(ret_1y)):
         if ret_1y > 30:
             layers.append(("Price Momentum", "pass", f"Stock up {ret_1y:+.1f}% in 1 year — strong market sentiment"))
         elif ret_1y > 0:
