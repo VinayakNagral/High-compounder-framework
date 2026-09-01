@@ -781,7 +781,8 @@ if page == "🔍 Single Stock":
                     elif peg < 1.5: st.info(f"PEG {peg:.2f} — Fair")
                     elif peg < 2.0: st.warning(f"PEG {peg:.2f} — Expensive")
                     else: st.error(f"PEG {peg:.2f} — Overvalued")
-              if layer1.get('pe') and layer1['pe'] > 80: st.error("🚨 ADANI FILTER: PE > 80")
+                           if layer1.get('pe') and layer1['pe'] > 80:
+                    st.error("🚨 ADANI FILTER: PE > 80")
                 st.markdown(f"**Sales CAGR:** {safe_fmt(layer1.get('sales_cagr'), '.1f')}% · **PAT CAGR:** {safe_fmt(layer1.get('pat_cagr'), '.1f')}%")
 
         with tab3:
