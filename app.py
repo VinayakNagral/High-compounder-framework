@@ -4,6 +4,10 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas as pdfcanvas
+from reportlab.lib.colors import HexColor, white, black
+from reportlab.lib.utils import simpleSplit
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -566,6 +570,88 @@ table{{border-collapse:collapse;width:100%;}}</style></head><body>
 <div style="padding:6px 16px;font-size:7px;color:#aaa;">Quantitative framework output. Not a research recommendation. Data from Yahoo Finance. For personal use only.</div>
 </body></html>'''
 
+def gen_pdf_bytes(name, ticker, sector, price, tier, size, l1, acct, val, ret, moat, layers, verdict):
+    buf = BytesIO()
+    c = pdfcanvas.Canvas(buf, pagesize=A4)
+    w, h = A4
+    navy = HexColor(NAVY); gray = HexColor('#6B7280'); lgray = HexColor('#E5E7EB')
+    green = HexColor('#059669'); red = HexColor('#DC2626'); amber = HexColor('#D97706'); blue = HexColor('#2563EB')
+    pr = f"\u20B9{price:,.2f}" if is_valid(price) else "—"
+    # Header band
+    c.setFillColor(navy); c.rect(0, h - 50, w, 50, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont('Helvetica-Bold', 10)
+    c.drawString(20, h - 20, 'HIGH COMPOUNDER FRAMEWORK')
+    c.setFont('Helvetica-Bold', 8)
+    c.drawString(20, h - 34, f'Vinayak Nagral  |  {datetime.now().strftime("%d %b %Y")}')
+    c.setFont('Helvetica', 7.5)
+    c.drawRightString(w - 20, h - 20, 'Quantitative screening')
+    c.drawRightString(w - 20, h - 34, 'Not investment advice')
+    y = h - 65
+    # Company name
+    c.setFillColor(navy); c.setFont('Helvetica-Bold', 22); c.drawString(20, y, name)
+    # Tier badge
+    tier_c = {'FULL': green, 'STANDARD': blue, 'HALF': amber, 'WATCH': red}.get(tier, gray)
+    bt = f'{tier}  {size}'; bw = c.stringWidth(bt, 'Helvetica-Bold', 10) + 24
+    c.setFillColor(tier_c); c.roundRect(w - 20 - bw, y - 3, bw, 22, 11, fill=1, stroke=0)
+    c.setFillColor(white); c.setFont('Helvetica-Bold', 10); c.drawCentredString(w - 20 - bw / 2, y + 3, bt)
+    y -= 18
+    c.setFillColor(gray); c.setFont('Helvetica', 9); c.drawString(20, y, f'{ticker}  |  {sector}  |  {pr}')
+    c.drawRightString(w - 20, y, f'Score {acct.get("score", "---")}/100')
+    y -= 12; c.setStrokeColor(navy); c.setLineWidth(2); c.line(20, y, w - 20, y)
+    y -= 25
+    # Metrics row
+    metrics = [('PE', fmt(l1['pe'], '.1f')), ('PEG', fmt(val.get('peg'), '.2f')), ('ROE', fmt(l1['roe'], '.1f', '%')),
+               ('ROCE', fmt(l1['roce'], '.1f', '%')), ('D/E', fmt(l1['de'], '.2f')), ('FCF Yield', fmt(val.get('fcf_yield'), '.1f', '%')),
+               ('1Y Return', fmt(ret, '+.1f', '%'))]
+    cw = (w - 40) / len(metrics)
+    for i, (lb, vl) in enumerate(metrics):
+        x = 20 + i * cw
+        c.setFillColor(gray); c.setFont('Helvetica', 7); c.drawCentredString(x + cw / 2, y + 2, lb)
+        c.setFillColor(navy); c.setFont('Helvetica-Bold', 13); c.drawCentredString(x + cw / 2, y - 14, vl)
+        if i < len(metrics) - 1: c.setStrokeColor(lgray); c.setLineWidth(0.5); c.line(x + cw, y + 8, x + cw, y - 20)
+    y -= 32; c.setStrokeColor(lgray); c.setLineWidth(0.5); c.line(20, y, w - 20, y)
+    y -= 18; mid = w * 0.6
+    # Section headers
+    c.setFillColor(navy); c.setFont('Helvetica-Bold', 8.5)
+    c.drawString(24, y, 'LAYER RESULTS'); c.drawString(mid + 10, y, 'GROWTH & CASH')
+    c.setStrokeColor(lgray); c.line(mid, y + 12, mid, y - 160)
+    y -= 16
+    # Layers
+    ly = y
+    for ln, st2, dt in layers:
+        ic_char = '\u2713' if st2 == 'pass' else '\u2717' if st2 == 'fail' else '\u26A0'
+        cl = green if st2 == 'pass' else red if st2 == 'fail' else amber
+        c.setFillColor(cl); c.setFont('Helvetica-Bold', 9); c.drawString(28, ly, ic_char)
+        c.setFillColor(navy); c.setFont('Helvetica-Bold', 8); c.drawString(44, ly, ln)
+        c.setFillColor(gray); c.setFont('Helvetica', 7)
+        detail = dt[:58] + '...' if len(dt) > 58 else dt
+        c.drawString(148, ly, detail)
+        ly -= 15
+    # Growth table
+    gy = y
+    growth = [('Sales CAGR', fmt(l1.get('sales_cagr'), '.1f', '%')), ('PAT CAGR', fmt(l1.get('pat_cagr'), '.1f', '%')),
+              ('Cum CFO/PAT', fmt(acct.get('cum_cfo_pat'), '.2f', 'x')), ('Cum CFO/EBITDA', fmt(acct.get('cum_cfo_ebitda'), '.2f', 'x')),
+              ('Moat durability', f"{moat.get('pct', 0)}%")]
+    margins = acct.get('margins', [])
+    if margins and len(margins) >= 2:
+        arr = '\u2191' if acct.get('margin_trend') == 'expanding' else '\u2193' if acct.get('margin_trend') == 'contracting' else '\u2192'
+        growth.append(('EBITDA margins', f"{margins[0]}% \u2192 {margins[-1]}% {arr}"))
+    for lb, vl in growth:
+        c.setFillColor(gray); c.setFont('Helvetica', 8); c.drawString(mid + 14, gy, lb)
+        c.setFillColor(navy); c.setFont('Courier-Bold', 9); c.drawRightString(w - 28, gy, vl)
+        gy -= 15
+    y = min(ly, gy) - 12; c.setStrokeColor(lgray); c.line(20, y, w - 20, y)
+    y -= 18
+    # Verdict
+    c.setFillColor(navy); c.setFont('Helvetica-Bold', 8.5); c.drawString(24, y, 'INVESTMENT VERDICT')
+    y -= 14; c.setFillColor(black); c.setFont('Helvetica', 8.5)
+    for line in simpleSplit(verdict, 'Helvetica', 8.5, w - 55):
+        c.drawString(28, y, line); y -= 12
+    y -= 8; c.setStrokeColor(lgray); c.line(20, y, w - 20, y)
+    y -= 12; c.setFillColor(HexColor('#AAAAAA')); c.setFont('Helvetica', 6)
+    c.drawString(20, y, 'Quantitative framework output. Not a research recommendation. Data from Yahoo Finance. For personal use only.')
+    c.save(); buf.seek(0); return buf.getvalue()
+
 # ============================================================
 # BATCH SCREENER WITH FUNNEL
 # ============================================================
@@ -612,7 +698,9 @@ def full_analysis(ticker):
     layers = gen_layers(l1, acct, cyc, val, mom, ret, moat)
     verdict = gen_verdict(l1['name'], tier, l1, acct, cyc, val, ret, moat, bank)
     html = gen_scorecard_html(l1['name'], ticker, l1['sector'], l1['price'], tier, size, l1, acct, val, ret, moat, layers, verdict)
-    return {'sd': sd, 'l1': l1, 'acct': acct, 'cyc': cyc, 'moat': moat, 'mom': mom, 'ret': ret, 'val': val, 'tier': tier, 'size': size, 'layers': layers, 'verdict': verdict, 'html': html, 'bank': bank, 'info': info, 'fin': fin, 'bs': bs, 'cf': cf, 'qfin': qfin}
+    try: pdf = gen_pdf_bytes(l1['name'], ticker, l1['sector'], l1['price'], tier, size, l1, acct, val, ret, moat, layers, verdict)
+    except Exception: pdf = None
+    return {'sd': sd, 'l1': l1, 'acct': acct, 'cyc': cyc, 'moat': moat, 'mom': mom, 'ret': ret, 'val': val, 'tier': tier, 'size': size, 'layers': layers, 'verdict': verdict, 'html': html, 'pdf': pdf, 'bank': bank, 'info': info, 'fin': fin, 'bs': bs, 'cf': cf, 'qfin': qfin}
 
 # ============================================================
 # APP
@@ -647,7 +735,10 @@ if page == "Single Stock":
         if bank: st.info("Banking/Financial — framework for non-financials. Scores for reference.")
         st.markdown("---")
         # PDF Export
-        st.download_button("📄 Download scorecard", data=res['html'], file_name=f"{name.replace(' ', '_')}_Scorecard.html", mime="text/html")
+        if res.get('pdf'):
+            st.download_button("📄 Download PDF scorecard", data=res['pdf'], file_name=f"{name.replace(' ', '_')}_Scorecard.pdf", mime="application/pdf")
+        else:
+            st.download_button("📄 Download scorecard (HTML)", data=res['html'], file_name=f"{name.replace(' ', '_')}_Scorecard.html", mime="text/html")
         # Metrics
         cols = st.columns(7)
         vals = [f"{acct.get('score', '—')}/100" if acct.get('score') is not None else "—", fmt(l1['pe'], '.1f'), fmt(val.get('peg'), '.2f'), fmt(l1['roe'], '.1f', '%'), fmt(val.get('fcf_yield'), '.1f', '%'), fmt(ret, '+.1f', '%'), ""]
