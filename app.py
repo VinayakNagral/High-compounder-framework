@@ -1461,7 +1461,7 @@ elif page == "Auto Top 10":
     st.subheader("Automatic Top 10 Picker")
     c1, c2 = st.columns(2)
     with c1:
-        mx = st.slider("Stocks to screen", 20, 200, 50, 10)
+        mx = st.slider("Stocks to screen", 20, 500, 100, 10)
     with c2:
         tn = st.slider("Show top N", 5, 20, 10)
     if st.button("Run screen", type="primary", use_container_width=True):
