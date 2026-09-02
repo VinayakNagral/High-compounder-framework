@@ -1903,6 +1903,7 @@ elif page == "Auto Top 10":
                       df['roe'].fillna(0) * .10 + df['ret'].apply(mom_s) * .15 +
                       df['cum_cfo'].apply(cfo_s) * .15 + df['moat'] * .15)
         df = df.sort_values('rank', ascending=False).head(tn)
+        df = df[df['tier'] != 'WATCH'] 
 
         # Apply sector cap
         if sector_cap_on:
