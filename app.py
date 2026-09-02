@@ -292,10 +292,7 @@ def fetch(ticker):
             qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
         except Exception:
             qfin = None
-        try:
-            qbs = t.quarterly_balance_sheet.copy() if t.quarterly_balance_sheet is not None and not t.quarterly_balance_sheet.empty else None
-        except Exception:
-            qbs = None
+        qbs = None  # removed: quarterly BS is unaudited and caused deployment issues
         ph = None
         try:
             h = t.history(period="1y", auto_adjust=True)
@@ -364,7 +361,7 @@ def fetch(ticker):
             'annual': fin.shape[1] if fin is not None else 0,
             'quarterly': qfin.shape[1] if qfin is not None else 0,
             'balance_sheet': bs.shape[1] if bs is not None else 0,
-            'q_balance_sheet': qbs.shape[1] if qbs is not None else 0,
+            
             'cashflow': cf.shape[1] if cf is not None else 0,
             'price_days': len(ph) if ph is not None else 0,
         }
@@ -857,71 +854,28 @@ def run_holdings_analysis(holdings):
     return result
 
 # ============================================================
-# MOAT DURABILITY (enhanced with quarterly reconstruction)
+# MOAT DURABILITY
 # ============================================================
-def run_moat(data, qbs=None, qfin=None):
+def run_moat(data):
     sd = sorted(data, key=lambda x: x['year'])
-
-    # Annual ROE history
     rh = []
     for d in sd:
         if is_valid(d.get('net_income')) and is_valid(d.get('equity')) and d['equity'] > 0:
             rh.append((d['year'], round(d['net_income'] / d['equity'] * 100, 1)))
-
-    # NEW: Extend with quarterly rolling ROE for longer history
-    q_roe_points = []
-    if qbs is not None and qfin is not None and qfin.shape[1] >= 4 and qbs.shape[1] >= 4:
-        n_q = min(qfin.shape[1], qbs.shape[1])
-        for start in range(0, n_q - 3):
-            # TTM net income = sum of 4 quarters
-            ni_vals = [get_ni(qfin, start + j) for j in range(4)]
-            if all(v is not None for v in ni_vals):
-                ttm_ni = sum(ni_vals)
-                # Average equity over the 4 quarters
-                eq_vals = [get_equity(qbs, start + j) for j in range(4)]
-                valid_eq = [v for v in eq_vals if is_valid(v) and v > 0]
-                if valid_eq:
-                    avg_eq = sum(valid_eq) / len(valid_eq)
-                    if avg_eq > 0:
-                        rolling_roe = round(ttm_ni / avg_eq * 100, 1)
-                        try:
-                            q_label = qfin.columns[start].strftime('%b%y')
-                        except Exception:
-                            q_label = f"Q{start}"
-                        q_roe_points.append((q_label, rolling_roe))
-
-    # Combine: use annual + quarterly for richer picture
-    all_roe_vals = [r[1] for r in rh]
-    all_roe_vals_extended = all_roe_vals + [r[1] for r in q_roe_points]
-
-    if not all_roe_vals:
+    if not rh:
         return dict(DEFAULT_MOAT)
-
-    vals = all_roe_vals  # use annual for classification
+    vals = [r[1] for r in rh]
     above = sum(1 for v in vals if v > 15)
     total = len(vals)
     pct = round(above / total * 100) if total > 0 else 0
-
     if above == total and total >= 2:
         cons = 'established moat'
     elif len(vals) >= 2 and vals[-1] > 15 and vals[-2] > 15 and vals[-1] > vals[0]:
         cons = 'emerging moat'
     else:
         cons = 'weak/no moat'
-
-    # NEW: Check if quarterly data tells a different story
-    if q_roe_points and cons == 'established moat':
-        q_vals = [r[1] for r in q_roe_points]
-        q_below = sum(1 for v in q_vals if v < 12)
-        if q_below >= 2:
-            cons = 'emerging moat'  # downgrade if quarterly shows weakness
-
-    return {
-        'years_above_15': above, 'total_years': total, 'pct': pct,
-        'consistency': cons, 'roe_by_year': rh,
-        'quarterly_roe': q_roe_points[:6],  # keep latest 6 for display
-        'extended_total': len(all_roe_vals_extended),
-    }
+    return {'years_above_15': above, 'total_years': total, 'pct': pct,
+            'consistency': cons, 'roe_by_year': rh, 'quarterly_roe': [], 'extended_total': total}
 
 # ============================================================
 # CYCLICAL ROE
@@ -1332,7 +1286,7 @@ def full_analysis(ticker):
     if not sd:
         return None
     info = sd['info']; fin = sd['fin']; bs = sd['bs']; cf = sd['cf']
-    qfin = sd['qfin']; qbs = sd.get('qbs')
+    qfin = sd['qfin']
     bank = is_banking(info, ticker)
     try:
         l1 = run_layer1(sd, ticker)
@@ -1351,7 +1305,7 @@ def full_analysis(ticker):
     except Exception:
         cyc = dict(DEFAULT_CYC)
     try:
-        moat = run_moat(multi, qbs, qfin) if multi else dict(DEFAULT_MOAT)
+        moat = run_moat(multi) if multi else dict(DEFAULT_MOAT)
     except Exception:
         moat = dict(DEFAULT_MOAT)
     try:
@@ -1433,7 +1387,7 @@ def analyse_with_funnel(ticker):
     try:
         acct = run_forensic(multi)
         cyc = run_cyclical(multi)
-        moat = run_moat(multi, sd.get('qbs'), sd.get('qfin'))
+        moat = run_moat(multi)
         val = run_valuation(l1['pe'], l1['pat_cagr'], l1.get('sales_cagr'), l1['price'], ext_mcap(sd, l1['price']), sd)
         ret = ext_1y_ret(sd)
         holdings = run_holdings_analysis(sd.get('holdings', dict(DEFAULT_HOLDINGS)))
