@@ -276,11 +276,26 @@ def fetch(ticker):
                             pass
         except Exception:
             pass
-        fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
-        bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
-        cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
-        qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
-        qbs = t.quarterly_balance_sheet.copy() if t.quarterly_balance_sheet is not None and not t.quarterly_balance_sheet.empty else None
+        try:
+            fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
+        except Exception:
+            fin = None
+        try:
+            bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
+        except Exception:
+            bs = None
+        try:
+            cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
+        except Exception:
+            cf = None
+        try:
+            qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
+        except Exception:
+            qfin = None
+        try:
+            qbs = t.quarterly_balance_sheet.copy() if t.quarterly_balance_sheet is not None and not t.quarterly_balance_sheet.empty else None
+        except Exception:
+            qbs = None
         ph = None
         try:
             h = t.history(period="1y", auto_adjust=True)
