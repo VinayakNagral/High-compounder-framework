@@ -1,1976 +1,3423 @@
+"""High Compounder Framework v2.1
+
+Streamlit stock screener for non-financial Indian listed companies.
+
+Important: this is a research-screening tool, not investment advice. Yahoo Finance
+fields are not authoritative; verify all investment-critical numbers against filings.
+"""
+from __future__ import annotations
+
+import html
+import io
+import math
+import time
+from urllib.request import Request, urlopen
+import warnings
+from datetime import datetime
+from typing import Any, Callable
+
+import numpy as np
+import pandas as pd
 import streamlit as st
 import yfinance as yf
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-import time
-import warnings
-import json
-warnings.filterwarnings('ignore')
 
-# ============================================================
-# CONFIG
-# ============================================================
+warnings.filterwarnings("ignore", category=FutureWarning)
+
+# =============================================================================
+# APP CONFIG
+# =============================================================================
 st.set_page_config(
-    page_title="High Compounder Framework",
+    page_title="High Compounder Framework v2.1",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
-NAVY = '#1B2A4A'
-BANKING_KW = [
-    'bank', 'finance', 'insurance', 'nbfc',
-    'housing finance', 'credit', 'lending', 'microfinance',
-]
 
-DEFAULT_ACCT = {
-    'score': None, 'flags': [], 'num_flags': 0,
-    'cum_cfo_pat': None, 'cum_cfo_ebitda': None,
-    'single_cfo_pat': None, 'cfo_ebitda_trend': [],
-    'recv_pcts': [], 'recv_years': [],
-    'margins_by_year': [], 'margin_trend': '',
-    'ccc': None, 'ccc_trend': None, 'accrual_ratio': None,
-}
-DEFAULT_CYC = {'peak': False, 'roe_by_year': {}}
-DEFAULT_MOAT = {
-    'pct': 0, 'consistency': 'no data',
-    'years_above_15': 0, 'total_years': 0, 'roe_by_year': [],
-}
-DEFAULT_MOM = {'available': False}
-DEFAULT_HOLDINGS = {
-    'insider_pct': None, 'inst_pct': None, 'inst_count': None,
-    'flags': [], 'score_adj': 0,
+NAVY = "#1B2A4A"
+
+# UPDATED D/E THRESHOLD
+MAX_DEBT_TO_EQUITY = 1.0
+
+BANKING_KW = (
+    "bank", "finance", "insurance", "nbfc", "housing finance",
+    "credit", "lending", "microfinance", "consumer finance",
+)
+
+TIER_MIDPOINT = {"FULL": 13.5, "STANDARD": 9.0, "HALF": 5.0, "WATCH": 0.0}
+TIER_SIZE = {
+    "FULL": "12–15%", "STANDARD": "8–10%", "HALF": "4–6%", "WATCH": "0%"
 }
 
-# ============================================================
-# STYLES
-# ============================================================
-st.markdown(f"""
+# =============================================================================
+# PRESENTATION
+# =============================================================================
+st.markdown(
+f"""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
-.main-title{{font-family:'DM Sans',sans-serif;font-size:1.75rem;font-weight:700;color:{NAVY};}}
-.sub-title{{font-size:0.85rem;color:#6B7280;}}
-.stock-name{{font-size:1.5rem;font-weight:700;color:{NAVY};}}
-.stock-meta{{font-size:0.85rem;color:#6B7280;}}
-.metric-card{{background:#fff;border:1px solid #E5E7EB;border-radius:8px;padding:0.8rem;text-align:center;}}
-.metric-val{{font-family:'JetBrains Mono',monospace;font-size:1.3rem;font-weight:600;color:{NAVY};}}
-.metric-lbl{{font-size:0.7rem;color:#6B7280;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;}}
-.tier-badge{{display:inline-block;padding:4px 14px;border-radius:20px;font-weight:600;font-size:0.85rem;}}
-.tier-full{{background:#ECFDF5;color:#059669;border:1px solid #059669;}}
-.tier-standard{{background:#EFF6FF;color:#2563EB;border:1px solid #2563EB;}}
-.tier-half{{background:#FFFBEB;color:#D97706;border:1px solid #D97706;}}
-.tier-watch{{background:#FEF2F2;color:#DC2626;border:1px solid #DC2626;}}
-.layer-row{{padding:0.5rem 0.8rem;border-radius:4px;margin:3px 0;font-size:0.85rem;border-left:3px solid;}}
+.main-title{{font-size:1.8rem;font-weight:750;color:{NAVY};}}
+.sub-title{{font-size:.88rem;color:#6B7280;}}
+.metric-card{{background:#fff;border:1px solid #E5E7EB;border-radius:9px;padding:.8rem;text-align:center;}}
+.metric-val{{font-family:monospace;font-size:1.25rem;font-weight:700;color:{NAVY};}}
+.metric-lbl{{font-size:.7rem;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;}}
+.layer-row{{padding:.5rem .75rem;border-radius:5px;margin:4px 0;border-left:3px solid;font-size:.86rem;}}
 .layer-pass{{background:#ECFDF5;border-color:#059669;}}
 .layer-fail{{background:#FEF2F2;border-color:#DC2626;}}
 .layer-warn{{background:#FFFBEB;border-color:#D97706;}}
-.verdict-box{{background:#F9FAFB;padding:1.2rem;border-radius:8px;border:1px solid #E5E7EB;line-height:1.8;font-size:0.9rem;}}
-.flag-item{{background:#FFFBEB;padding:0.4rem 0.8rem;border-radius:4px;margin:3px 0;border-left:3px solid #D97706;font-size:0.85rem;}}
-.clean-item{{background:#ECFDF5;padding:0.4rem 0.8rem;border-radius:4px;margin:3px 0;border-left:3px solid #059669;font-size:0.85rem;}}
-.score-card{{padding:1rem;border-radius:8px;text-align:center;}}
-.score-green{{background:#ECFDF5;border:1px solid #059669;}}
-.score-yellow{{background:#FFFBEB;border:1px solid #D97706;}}
-.score-red{{background:#FEF2F2;border:1px solid #DC2626;}}
-.debug-row{{font-family:'JetBrains Mono',monospace;font-size:0.8rem;padding:3px 0;border-bottom:1px solid #f0f0f0;}}
-.debug-label{{color:#6B7280;display:inline-block;width:180px;}}
-.debug-val{{color:{NAVY};}}
-.debug-ok{{color:#059669;}}
-.debug-bad{{color:#DC2626;}}
-.debug-fb{{color:#D97706;font-size:0.7rem;}}
-.leading-tag{{display:inline-block;padding:2px 6px;border-radius:3px;font-size:0.65rem;font-weight:600;background:#DBEAFE;color:#1D4ED8;margin-left:4px;vertical-align:middle;}}
-.lagging-tag{{display:inline-block;padding:2px 6px;border-radius:3px;font-size:0.65rem;font-weight:600;background:#E5E7EB;color:#6B7280;margin-left:4px;vertical-align:middle;}}
+.verdict-box{{background:#F9FAFB;padding:1rem;border-radius:8px;border:1px solid #E5E7EB;line-height:1.7;}}
 </style>
 """, unsafe_allow_html=True)
 
-# ============================================================
-# UTILITY FUNCTIONS
-# ============================================================
-def is_valid(val):
-    if val is None:
+# =============================================================================
+# GENERIC HELPERS
+# =============================================================================
+def is_valid(value: Any) -> bool:
+    if value is None:
         return False
     try:
-        return bool(np.isfinite(float(val)))
+        return bool(np.isfinite(float(value)))
     except (TypeError, ValueError, OverflowError):
         return False
 
-def safe_get(df, label, col=0):
-    try:
-        if df is not None and label in df.index:
-            v = df.loc[label].iloc[col]
-            if pd.notna(v):
-                return float(v)
-    except Exception:
-        pass
-    return None
 
-def fmt(val, f=".1f", suffix="", prefix=""):
-    if not is_valid(val):
+def safe_float(value: Any) -> float | None:
+    try:
+        result = float(value)
+        return result if np.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def percentage_0_100(value: Any) -> float | None:
+    value = safe_float(value)
+    if value is None or value < 0 or value > 100:
+        return None
+    return value
+
+
+def fmt(value: Any, spec: str = ".1f", suffix: str = "", prefix: str = "") -> str:
+    if not is_valid(value):
         return "N/A"
-    return f"{prefix}{val:{f}}{suffix}"
+    return f"{prefix}{float(value):{spec}}{suffix}"
 
-def fy_label(dt):
+
+def clean_ticker(ticker: str) -> str:
+    ticker = str(ticker).strip().upper()
+    if not ticker:
+        return ""
+    return ticker if ticker.endswith((".NS", ".BO")) else f"{ticker}.NS"
+
+
+def fy_label(value: Any) -> str:
     try:
-        return f"FY{str(dt.year)[2:]}" if dt.month <= 3 else f"FY{str(dt.year + 1)[2:]}"
+        dt = pd.Timestamp(value)
+        fy = dt.year + 1 if dt.month > 3 else dt.year
+        return f"FY{str(fy)[-2:]}"
     except Exception:
         return ""
 
-# ============================================================
-# FINANCIAL FIELD GETTERS
-# ============================================================
-def get_revenue(fin, col=0):
-    for field in ['Total Revenue', 'Operating Revenue', 'Revenue', 'Net Revenue']:
-        v = safe_get(fin, field, col)
-        if is_valid(v) and v > 0:
-            return v
-    return None
 
-def get_ni(fin, col=0):
-    for field in ['Net Income', 'Net Income Common Stockholders', 'Net Income Continuous Operations']:
-        v = safe_get(fin, field, col)
-        if v is not None:
-            return v
-    return None
+def _normalise_label(label: Any) -> str:
+    return " ".join(str(label).lower().replace("&", "and").replace("_", " ").split())
 
-def get_ebitda(fin, col=0):
-    for field in ['EBITDA', 'Normalized EBITDA']:
-        v = safe_get(fin, field, col)
-        if is_valid(v) and v > 0:
-            return v
-    return None
 
-def get_ebit(fin, col=0):
-    for field in ['EBIT', 'Operating Income', 'Operating Profit', 'Normalized EBIT']:
-        v = safe_get(fin, field, col)
-        if v is not None:
-            return v
-    return None
+def safe_get(
+    df: pd.DataFrame | None,
+    labels: str | tuple[str, ...] | list[str],
+    col: Any = 0
+) -> float | None:
+    """Read a financial statement row using exact/normalised aliases.
 
-def get_equity(bs, col=0):
-    for field in ['Stockholders Equity', 'Total Stockholders Equity',
-                  'Common Stock Equity', 'Total Equity Gross Minority Interest']:
-        v = safe_get(bs, field, col)
-        if is_valid(v) and v > 0:
-            return v
-    return None
-
-def get_cfo(cf, col=0):
-    for field in ['Operating Cash Flow', 'Total Cash From Operating Activities',
-                  'Cash Flow From Continuing Operating Activities']:
-        v = safe_get(cf, field, col)
-        if v is not None:
-            return v
-    return None
-
-def get_fcf(cf, col=0):
-    v = safe_get(cf, 'Free Cash Flow', col)
-    if v is not None:
-        return v
-    cfo = get_cfo(cf, col)
-    capex = safe_get(cf, 'Capital Expenditure', col)
-    if is_valid(cfo) and is_valid(capex):
-        return cfo + capex  # capex is negative in yfinance
-    return cfo
-
-def get_receivables(bs, col=0):
-    for field in ['Accounts Receivable', 'Net Receivables', 'Receivables']:
-        v = safe_get(bs, field, col)
-        if v is not None:
-            return v
-    return None
-
-def get_payables(bs, col=0):
-    for field in ['Accounts Payable', 'Payables And Accrued Expenses', 'Current Accounts Payable']:
-        v = safe_get(bs, field, col)
-        if v is not None:
-            return v
-    return None
-
-def get_interest_expense(fin, col=0):
-    """Get interest expense (returned as positive number)."""
-    for field in ['Interest Expense', 'Interest Expense Non Operating',
-                  'Net Interest Income', 'Net Non Operating Interest Income Expense']:
-        v = safe_get(fin, field, col)
-        if v is not None:
-            return abs(v)
-    return None
-
-def get_cash(bs, col=0):
-    """Get cash and equivalents from balance sheet."""
-    for field in ['Cash And Cash Equivalents', 'Cash Cash Equivalents And Short Term Investments',
-                  'Cash Financial', 'Cash And Short Term Investments']:
-        v = safe_get(bs, field, col)
-        if is_valid(v) and v >= 0:
-            return v
-    return None
-
-def get_total_debt(bs, col=0):
-    """Get total debt from balance sheet."""
-    for field in ['Total Debt', 'Long Term Debt And Capital Lease Obligation',
-                  'Long Term Debt', 'Net Debt']:
-        v = safe_get(bs, field, col)
-        if is_valid(v) and v >= 0:
-            return v
-    return None
-
-def get_shares(fin, bs, qfin, info):
-    for src in [qfin, fin]:
-        if src is not None:
-            for field in ['Diluted Average Shares', 'Basic Average Shares']:
-                v = safe_get(src, field, 0)
-                if is_valid(v) and v > 1000:
-                    return v
-    if bs is not None:
-        for field in ['Ordinary Shares Number', 'Share Issued']:
-            v = safe_get(bs, field, 0)
-            if is_valid(v) and v > 1000:
-                return v
-    v = info.get('sharesOutstanding')
-    if is_valid(v) and v > 1000:
-        return float(v)
-    return None
-
-def validate_shares(price, shares, info):
-    mcap_reported = info.get('marketCap')
-    if not all(is_valid(x) and x > 0 for x in [price, shares, mcap_reported]):
-        return shares, False
-    computed = price * shares
-    ratio = mcap_reported / computed
-    if 0.33 < ratio < 3.0:
-        return shares, False
-    for multiplier in [1000, 100, 10, 0.001, 0.01, 0.1]:
-        test_ratio = mcap_reported / (price * shares * multiplier)
-        if 0.5 < test_ratio < 2.0:
-            return shares * multiplier, True
-    return mcap_reported / price, True
-
-def is_banking(info, name=""):
-    s = (info.get('sector', '') or '').lower()
-    ind = (info.get('industry', '') or '').lower()
-    n = (info.get('shortName', '') or name or '').lower()
-    return any(k in s or k in ind or k in n for k in BANKING_KW)
-
-# ============================================================
-# DATA FETCHING (improved with holdings)
-# ============================================================
-@st.cache_data(ttl=3600, show_spinner=False)
-def fetch(ticker):
-    debug = {'ticker': ticker, 'fallbacks': [], 'warnings': []}
-    try:
-        t = yf.Ticker(ticker)
-        try:
-            info = {k: v for k, v in (dict(t.info) if t.info else {}).items() if v is not None}
-        except Exception:
-            info = {}
-        try:
-            fi = t.fast_info
-            if fi:
-                for attr, key in [('last_price', 'currentPrice'), ('previous_close', 'previousClose'),
-                                  ('market_cap', 'marketCap'), ('shares', 'sharesOutstanding')]:
-                    if not is_valid(info.get(key)):
-                        try:
-                            v = getattr(fi, attr, None)
-                            if is_valid(v) and v > 0:
-                                info[key] = float(v)
-                                debug['fallbacks'].append(f'{key} from fast_info')
-                        except Exception:
-                            pass
-        except Exception:
-            pass
-        try:
-            fin = t.financials.copy() if t.financials is not None and not t.financials.empty else None
-        except Exception:
-            fin = None
-        try:
-            bs = t.balance_sheet.copy() if t.balance_sheet is not None and not t.balance_sheet.empty else None
-        except Exception:
-            bs = None
-        try:
-            cf = t.cashflow.copy() if t.cashflow is not None and not t.cashflow.empty else None
-        except Exception:
-            cf = None
-        try:
-            qfin = t.quarterly_financials.copy() if t.quarterly_financials is not None and not t.quarterly_financials.empty else None
-        except Exception:
-            qfin = None
-        qbs = None  # removed: quarterly BS is unaudited and caused deployment issues
-        ph = None
-        try:
-            h = t.history(period="1y", auto_adjust=True)
-            if h is not None and not h.empty and 'Close' in h.columns:
-                ph = h['Close'].dropna()
-                if len(ph) > 0 and not is_valid(info.get('currentPrice')):
-                    info['currentPrice'] = float(ph.iloc[-1])
-                    debug['fallbacks'].append('price from 1y history')
-        except Exception:
-            pass
-        if ph is None or len(ph) == 0:
-            try:
-                h = t.history(period="5d", auto_adjust=True)
-                if h is not None and not h.empty and 'Close' in h.columns:
-                    ph = h['Close'].dropna()
-                    if len(ph) > 0 and not is_valid(info.get('currentPrice')):
-                        info['currentPrice'] = float(ph.iloc[-1])
-                        debug['fallbacks'].append('price from 5d history')
-            except Exception:
-                pass
-        if not is_valid(info.get('sharesOutstanding')):
-            sh = get_shares(fin, bs, qfin, {})
-            if sh:
-                info['sharesOutstanding'] = sh
-                debug['fallbacks'].append('shares from financials')
-        price_for_val = None
-        for f in ['currentPrice', 'regularMarketPrice', 'previousClose']:
-            v = info.get(f)
-            if is_valid(v) and v > 0:
-                price_for_val = float(v)
-                break
-        if is_valid(info.get('sharesOutstanding')) and price_for_val:
-            corrected, was_fixed = validate_shares(price_for_val, info['sharesOutstanding'], info)
-            if was_fixed:
-                info['sharesOutstanding'] = corrected
-                debug['warnings'].append(f'Shares unit corrected to {corrected:,.0f}')
-
-        # ---- NEW: Fetch holdings data (leading indicator) ----
-        holdings = dict(DEFAULT_HOLDINGS)
-        try:
-            mh = t.major_holders
-            if mh is not None and not mh.empty:
-                for idx_row in range(len(mh)):
-                    try:
-                        val_raw = mh.iloc[idx_row, 0]
-                        label_raw = str(mh.iloc[idx_row, 1]).lower() if mh.shape[1] > 1 else ''
-                        val_clean = float(str(val_raw).replace('%', '').strip())
-                        if 'insider' in label_raw or 'promoter' in label_raw:
-                            holdings['insider_pct'] = round(val_clean, 1)
-                        elif 'institution' in label_raw and 'float' not in label_raw:
-                            holdings['inst_pct'] = round(val_clean, 1)
-                        elif 'number' in label_raw:
-                            holdings['inst_count'] = int(val_clean)
-                    except (ValueError, IndexError):
-                        continue
-                debug['fallbacks'].append('holdings from major_holders')
-        except Exception:
-            pass
-
-        has_price = any(is_valid(info.get(f)) for f in ['currentPrice', 'regularMarketPrice', 'previousClose'])
-        has_fin = fin is not None and fin.shape[1] >= 1
-        has_name = any(info.get(f) for f in ['shortName', 'longName'])
-        if not has_price and not has_fin and not has_name:
-            return None
-        debug['data_years'] = {
-            'annual': fin.shape[1] if fin is not None else 0,
-            'quarterly': qfin.shape[1] if qfin is not None else 0,
-            'balance_sheet': bs.shape[1] if bs is not None else 0,
-            
-            'cashflow': cf.shape[1] if cf is not None else 0,
-            'price_days': len(ph) if ph is not None else 0,
-        }
-        return {"info": info, "fin": fin, "bs": bs, "cf": cf, "qfin": qfin,
-                "qbs": qbs, "ph": ph, "debug": debug, "holdings": holdings}
-    except Exception:
+    `col` can be a positional integer or an actual column label.
+    """
+    if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return None
 
-# ============================================================
-# METRIC EXTRACTORS
-# ============================================================
-def ext_price(sd):
-    for f in ['currentPrice', 'regularMarketPrice', 'regularMarketPreviousClose', 'previousClose']:
-        v = sd['info'].get(f)
-        if is_valid(v) and v > 0:
-            return round(float(v), 2)
-    ph = sd.get('ph')
-    if ph is not None and len(ph) > 0:
-        v = float(ph.iloc[-1])
-        if is_valid(v) and v > 0:
-            return round(v, 2)
-    return None
+    aliases = [labels] if isinstance(labels, str) else list(labels)
 
-def ext_name(sd, ticker):
-    for f in ['shortName', 'longName', 'displayName']:
-        v = sd['info'].get(f)
-        if v and str(v).strip() and str(v).strip().lower() != 'none':
-            return str(v).strip()
-    return ticker.replace('.NS', '').replace('.BO', '')
-
-def ext_sector(sd):
-    for f in ['sector', 'industry']:
-        v = sd['info'].get(f)
-        if v and str(v).strip() and str(v).strip().lower() != 'none':
-            return str(v).strip()
-    return "—"
-
-def ext_pe(sd, price):
-    info = sd['info']
-    for f in ['trailingPE', 'forwardPE']:
-        v = info.get(f)
-        if is_valid(v) and 1 < v < 500:
-            return round(float(v), 1), f
-    if not is_valid(price) or price <= 0:
-        return None, 'no price'
-    for f in ['trailingEps', 'forwardEps']:
-        eps = info.get(f)
-        if is_valid(eps) and eps > 0:
-            pe = price / eps
-            if 1 < pe < 500:
-                return round(pe, 1), f'price/{f}'
-    qfin = sd.get('qfin')
-    if qfin is not None and qfin.shape[1] >= 4:
-        ni_vals = [get_ni(qfin, i) for i in range(4)]
-        valid_vals = [v for v in ni_vals if v is not None]
-        if len(valid_vals) >= 3:
-            ttm = sum(valid_vals)
-            if ttm > 0:
-                sh = get_shares(sd.get('fin'), sd.get('bs'), qfin, info)
-                if is_valid(sh) and sh > 0:
-                    pe = price / (ttm / sh)
-                    if 1 < pe < 500:
-                        return round(pe, 1), 'TTM_quarterly'
-    fin = sd.get('fin')
-    if fin is not None:
-        ni = get_ni(fin, 0)
-        if is_valid(ni) and ni > 0:
-            sh = get_shares(fin, sd.get('bs'), sd.get('qfin'), info)
-            if is_valid(sh) and sh > 0:
-                pe = price / (ni / sh)
-                if 1 < pe < 500:
-                    return round(pe, 1), 'annual_NI/shares'
-    return None, 'not calculable'
-
-def ext_mcap(sd, price):
-    v = sd['info'].get('marketCap')
-    if is_valid(v) and v > 0:
-        return float(v)
-    if is_valid(price) and price > 0:
-        sh = get_shares(sd.get('fin'), sd.get('bs'), sd.get('qfin'), sd['info'])
-        if is_valid(sh) and sh > 0:
-            return price * sh
-    return None
-
-def ext_de(sd):
-    info_de = sd['info'].get('debtToEquity')
-    if is_valid(info_de):
-        # yfinance reports D/E as percentage (e.g. 45 = 0.45x)
-        # BUG FIX: detect if already in decimal form
-        val = float(info_de)
-        if val > 5:  # likely percentage form (e.g. 45.2 meaning 0.452x)
-            return round(val / 100, 2)
-        else:  # already in ratio form (e.g. 0.45)
-            return round(val, 2)
-    bs = sd.get('bs')
-    if bs is not None:
-        debt = get_total_debt(bs, 0) or 0
-        eq = get_equity(bs, 0)
-        if is_valid(eq) and eq > 0:
-            return round(debt / eq, 2)
-    return 0.0
-
-# NEW: Interest Coverage Ratio
-def ext_interest_coverage(sd):
-    """EBIT / Interest Expense. Higher = safer. Below 3 = danger."""
-    fin = sd.get('fin')
-    if fin is None:
-        return None, 'no data'
-    ebit = get_ebit(fin, 0)
-    interest = get_interest_expense(fin, 0)
-    if is_valid(ebit) and is_valid(interest) and interest > 0:
-        return round(ebit / interest, 1), 'EBIT/Interest'
-    # Fallback: try from info dict
-    v = sd['info'].get('interestCoverage')
-    if is_valid(v):
-        return round(float(v), 1), 'info'
-    return None, 'not calculable'
-
-# NEW: Net Debt
-def ext_net_debt(sd):
-    """Total Debt - Cash. Negative = net cash positive."""
-    bs = sd.get('bs')
-    if bs is None:
-        return None
-    debt = get_total_debt(bs, 0) or 0
-    cash = get_cash(bs, 0) or 0
-    return round((debt - cash) / 1e7, 0)  # in crores
-
-def ext_cagr(fin, getter, min_years=0.8):
-    if fin is None or fin.shape[1] < 2:
-        return None, None, None, None
-    lv, ld, ov, od = None, None, None, None
-    for i in range(fin.shape[1]):
-        v = getter(fin, i)
-        if is_valid(v) and v > 0:
-            d = fin.columns[i]
-            if lv is None:
-                lv, ld = v, d
-            ov, od = v, d
-    if lv is None or ov is None or ld == od:
-        return None, None, None, None
     try:
-        yrs = abs((ld - od).days) / 365.25
-    except Exception:
-        yrs = float(abs(fin.columns.tolist().index(ld) - fin.columns.tolist().index(od)))
-    if yrs < min_years:
-        return None, None, None, None
-    label = f"{fy_label(od)}-{fy_label(ld)}" if fy_label(od) and fy_label(ld) else f"{round(yrs)}Y"
-    try:
-        c = ((lv / ov) ** (1.0 / yrs) - 1) * 100
-        if is_valid(c) and -99 < c < 500:
-            dbg = f"annual: {ov / 1e7:.0f}Cr -> {lv / 1e7:.0f}Cr over {yrs:.1f}y"
-            return round(c, 1), label, round(yrs, 1), dbg
-    except Exception:
-        pass
-    return None, None, None, None
-
-def ext_cagr_q(qfin, getter):
-    if qfin is None or qfin.shape[1] < 5:
-        return None, None, None, None
-    n = qfin.shape[1]
-    lt_vals = [getter(qfin, i) for i in range(min(4, n))]
-    lt = sum(v for v in lt_vals if v is not None)
-    if n >= 8:
-        ot_vals = [getter(qfin, i) for i in range(4, 8)]
-        ot = sum(v for v in ot_vals if v is not None)
-        try:
-            yrs = abs((qfin.columns[0] - qfin.columns[4]).days) / 365.25
-        except Exception:
-            yrs = 1.0
-    else:
-        ot_vals = [getter(qfin, i) for i in range(n - 4, n)]
-        ot = sum(v for v in ot_vals if v is not None)
-        try:
-            yrs = abs((qfin.columns[0] - qfin.columns[n - 4]).days) / 365.25
-        except Exception:
-            yrs = 1.0
-    if lt and lt > 0 and ot and ot > 0 and yrs > 0.5:
-        try:
-            c = ((lt / ot) ** (1.0 / yrs) - 1) * 100
-            if is_valid(c) and -99 < c < 500:
-                label = f"{fy_label(qfin.columns[min(n - 1, 7)])}-{fy_label(qfin.columns[0])}"
-                dbg = f"quarterly TTM: {ot / 1e7:.0f}Cr -> {lt / 1e7:.0f}Cr over {yrs:.1f}y"
-                return round(c, 1), label, round(yrs, 1), dbg
-        except Exception:
-            pass
-    return None, None, None, None
-
-def ext_roe(fin, bs, info):
-    ni = get_ni(fin, 0) if fin is not None else None
-    eq = get_equity(bs, 0) if bs is not None else None
-    if is_valid(ni) and is_valid(eq) and eq > 0:
-        return round(ni / eq * 100, 1), 'manual'
-    v = info.get('returnOnEquity')
-    if is_valid(v):
-        return round(float(v) * 100, 1), 'info'
-    return None, 'none'
-
-def ext_roce(fin, bs):
-    ebit = get_ebit(fin, 0) if fin is not None else None
-    ta = safe_get(bs, 'Total Assets', 0) if bs is not None else None
-    cl = safe_get(bs, 'Current Liabilities', 0) if bs is not None else None
-    if is_valid(ebit) and is_valid(ta) and is_valid(cl) and (ta - cl) > 0:
-        return round(ebit / (ta - cl) * 100, 1)
-    return None
-
-def ext_1y_ret(sd):
-    ph = sd.get('ph')
-    if ph is None or len(ph) < 30:
-        return None
-    try:
-        cur = float(ph.iloc[-1])
-        if not is_valid(cur) or cur <= 0:
-            return None
-        tgt = ph.index[-1] - pd.Timedelta(days=365)
-        mask = ph.index <= tgt
-        if mask.sum() > 0:
-            past = float(ph.loc[mask].iloc[-1])
+        if isinstance(col, int):
+            if col < 0 or col >= len(df.columns):
+                return None
+            col_label = df.columns[col]
         else:
-            past = float(ph.iloc[0])
-        if is_valid(past) and past > 0:
-            r = round((cur / past - 1) * 100, 1)
-            return r if is_valid(r) else None
+            col_label = col
+            if col_label not in df.columns:
+                return None
+
+        index_lookup = {_normalise_label(x): x for x in df.index}
+
+        for alias in aliases:
+            actual = alias if alias in df.index else index_lookup.get(_normalise_label(alias))
+            if actual is None:
+                continue
+
+            value = df.loc[actual, col_label]
+
+            if isinstance(value, pd.Series):
+                value = value.iloc[0]
+
+            return safe_float(value)
+
     except Exception:
-        pass
+        return None
+
     return None
 
-# ============================================================
-# LAYER 1 — QUANTITATIVE CORE SCREEN
-# ============================================================
-def run_layer1(sd, ticker):
-    r = {}
-    info = sd['info']
-    fin = sd.get('fin')
-    bs = sd.get('bs')
-    r['price'] = ext_price(sd)
-    mcap = ext_mcap(sd, r['price'])
-    r['mcap_cr'] = round(mcap / 1e7) if is_valid(mcap) else None
-    r['mcap_pass'] = is_valid(mcap) and mcap > 150e9
-    r['pe'], r['pe_source'] = ext_pe(sd, r['price'])
-    r['de'] = ext_de(sd)
-    r['de_pass'] = is_valid(r['de']) and r['de'] < 0.5
-    r['roe'], r['roe_source'] = ext_roe(fin, bs, info)
-    r['roe_pass'] = is_valid(r['roe']) and r['roe'] > 15
-    r['roce'] = ext_roce(fin, bs)
-    r['roce_pass'] = is_valid(r['roce']) and r['roce'] > 18
 
-    # NEW: Interest coverage & net debt
-    r['int_cov'], r['int_cov_source'] = ext_interest_coverage(sd)
-    r['net_debt_cr'] = ext_net_debt(sd)
-
-    sc, sl, sy, sd1 = ext_cagr(fin, get_revenue)
-    r['sales_cagr_debug'] = sd1
-    if sc is None:
-        sc, sl, sy, sd1 = ext_cagr_q(sd.get('qfin'), get_revenue)
-        r['sales_cagr_debug'] = sd1 or 'quarterly fallback'
-    if sc is None and is_valid(info.get('revenueGrowth')):
-        sc = round(float(info['revenueGrowth']) * 100, 1)
-        sl = "1Y"
-        r['sales_cagr_debug'] = 'info.revenueGrowth fallback'
-    r['sales_cagr'] = sc
-    r['sales_cagr_label'] = sl or ""
-    pc, pl, py, pd1 = ext_cagr(fin, get_ni)
-    r['pat_cagr_debug'] = pd1
-    if pc is None:
-        pc, pl, py, pd1 = ext_cagr_q(sd.get('qfin'), get_ni)
-        r['pat_cagr_debug'] = pd1 or 'quarterly fallback'
-    if pc is None and is_valid(info.get('earningsGrowth')):
-        pc = round(float(info['earningsGrowth']) * 100, 1)
-        pl = "1Y"
-        r['pat_cagr_debug'] = 'info.earningsGrowth fallback'
-    r['pat_cagr'] = pc
-    r['pat_cagr_label'] = pl or ""
-    growth_floor = 15
-    r['growth_relaxed'] = False
-    if is_valid(r['roe']) and r['roe'] > 25 and is_valid(mcap) and mcap > 500e9:
-        growth_floor = 10
-        r['growth_relaxed'] = True
-    r['growth_floor'] = growth_floor
-    r['growth_pass'] = (r.get('sales_cagr') or 0) > growth_floor and (r.get('pat_cagr') or 0) > growth_floor
-    r['pass'] = all([r['mcap_pass'], r['de_pass'], r['roe_pass'], r['roce_pass'], r['growth_pass']])
-    r['name'] = ext_name(sd, ticker)
-    r['sector'] = ext_sector(sd)
-    return r
-
-# ============================================================
-# MULTI-YEAR DATA BUILDER
-# ============================================================
-def build_multi(fin, bs, cf):
-    if fin is None or bs is None or cf is None:
+def _statement_date(col: Any) -> pd.Timestamp | None:
+    try:
+        dt = pd.Timestamp(col)
+        return dt if not pd.isna(dt) else None
+    except Exception:
         return None
-    yrs = min(fin.shape[1], bs.shape[1], cf.shape[1])
-    if yrs < 2:
+
+
+def _match_statement_column(
+    df: pd.DataFrame | None,
+    target: Any,
+    tolerance_days: int = 45
+) -> Any | None:
+    """Match statement columns by reporting date, not by column position."""
+
+    if df is None or df.empty:
         return None
-    rows = []
-    for i in range(yrs):
-        rows.append({
-            'year': str(fin.columns[i].year) if hasattr(fin.columns[i], 'year') else str(i),
-            'revenue': get_revenue(fin, i), 'net_income': get_ni(fin, i),
-            'ebitda': get_ebitda(fin, i), 'ebit': get_ebit(fin, i),
-            'receivables': get_receivables(bs, i),
-            'inventory': safe_get(bs, 'Inventory', i), 'equity': get_equity(bs, i),
-            'current_liabilities': safe_get(bs, 'Current Liabilities', i),
-            'total_assets': safe_get(bs, 'Total Assets', i),
-            'cfo': get_cfo(cf, i), 'payables': get_payables(bs, i),
-            'interest_expense': get_interest_expense(fin, i),
-            'cash': get_cash(bs, i),
-            'total_debt': get_total_debt(bs, i),
-        })
-    return rows
 
-# ============================================================
-# FORENSIC ACCOUNTING (enhanced with accrual ratio)
-# ============================================================
-def run_forensic(data):
-    flags = []
-    score = 100
-    det = {}
-    sd = sorted(data, key=lambda x: x['year'])
-    latest = sd[-1]
-    prior = sd[-2] if len(sd) >= 2 else None
+    target_dt = _statement_date(target)
 
-    # Check 1: Receivables trend
-    rp = []
-    for d in sd:
-        if is_valid(d.get('receivables')) and is_valid(d.get('revenue')) and d['revenue'] > 0:
-            rp.append(round(d['receivables'] / d['revenue'] * 100, 1))
-        else:
-            rp.append(None)
-    det['recv_pcts'] = rp
-    det['recv_years'] = [d['year'] for d in sd]
-    vr = [x for x in rp if x is not None]
-    if len(vr) >= 3 and sum(1 for i in range(1, len(vr)) if vr[i] > vr[i - 1]) >= 2:
-        flags.append(f"Receivables rising: {vr[-3]}% -> {vr[-2]}% -> {vr[-1]}% of revenue")
-        score -= 15
+    if target_dt is None:
+        return None
 
-    # Check 2: Inventory bloat
-    det['inv_growth'] = None
-    det['rev_growth_yoy'] = None
-    if prior:
-        il, ip = latest.get('inventory'), prior.get('inventory')
-        rl, rp2 = latest.get('revenue'), prior.get('revenue')
-        if all(is_valid(v) and v > 0 for v in [il, ip, rl, rp2]):
-            ig = round((il / ip - 1) * 100, 1)
-            rg = round((rl / rp2 - 1) * 100, 1)
-            det['inv_growth'] = ig
-            det['rev_growth_yoy'] = rg
-            if ig > rg + 10:
-                flags.append(f"Inventory bloat: {ig}% vs Revenue {rg}%")
-                score -= 15
+    candidates = []
 
-    # Check 3: Cumulative CFO/PAT
-    tc = sum(d['cfo'] for d in sd if is_valid(d.get('cfo')))
-    tp = sum(d['net_income'] for d in sd if is_valid(d.get('net_income')))
-    if tp > 0:
-        det['cum_cfo_pat'] = round(tc / tp, 2)
-        if det['cum_cfo_pat'] < 0.5:
-            flags.append(f"Critical: Cum CFO/PAT {det['cum_cfo_pat']}x")
-            score -= 30
-        elif det['cum_cfo_pat'] < 0.7:
-            flags.append(f"Low cash: Cum CFO/PAT {det['cum_cfo_pat']}x")
-            score -= 20
-    else:
-        det['cum_cfo_pat'] = None
-    det['single_cfo_pat'] = None
-    if is_valid(latest.get('cfo')) and is_valid(latest.get('net_income')) and latest['net_income'] > 0:
-        det['single_cfo_pat'] = round(latest['cfo'] / latest['net_income'], 2)
+    for col in df.columns:
+        col_dt = _statement_date(col)
 
-    # Check 4: Cumulative CFO/EBITDA
-    te = sum(d['ebitda'] for d in sd if is_valid(d.get('ebitda')) and d['ebitda'] > 0)
-    if te > 0:
-        det['cum_cfo_ebitda'] = round(tc / te, 2)
-        if det['cum_cfo_ebitda'] < 0.5:
-            flags.append(f"Critical: Cum CFO/EBITDA {det['cum_cfo_ebitda']}x")
-            score -= 20
-        elif det['cum_cfo_ebitda'] < 0.7:
-            flags.append(f"Weak: Cum CFO/EBITDA {det['cum_cfo_ebitda']}x")
-            score -= 15
-    else:
-        det['cum_cfo_ebitda'] = None
-    yr_ratios = []
-    for d in sd:
-        if is_valid(d.get('cfo')) and is_valid(d.get('ebitda')) and d['ebitda'] > 0:
-            yr_ratios.append(round(d['cfo'] / d['ebitda'], 2))
-    det['cfo_ebitda_trend'] = yr_ratios
-    if (len(yr_ratios) >= 2 and is_valid(det.get('cum_cfo_ebitda'))
-            and yr_ratios[-1] < yr_ratios[-2] and yr_ratios[-1] < 0.5 and det['cum_cfo_ebitda'] < 0.7):
-        flags.append(f"Deteriorating: CFO/EBITDA {yr_ratios[-2]} -> {yr_ratios[-1]}")
-        score -= 10
-
-    # Bonus: Negative cumulative CFO
-    if tc < 0:
-        flags.append("Negative cumulative CFO")
-        score -= 25
-
-    # NEW Check 5: Accrual Ratio — (NI - CFO) / Avg Total Assets
-    det['accrual_ratio'] = None
-    if prior and is_valid(latest.get('net_income')) and is_valid(latest.get('cfo')):
-        ta_l = latest.get('total_assets')
-        ta_p = prior.get('total_assets')
-        if is_valid(ta_l) and is_valid(ta_p) and (ta_l + ta_p) > 0:
-            avg_ta = (ta_l + ta_p) / 2
-            ar = round((latest['net_income'] - latest['cfo']) / avg_ta * 100, 1)
-            det['accrual_ratio'] = ar
-            if ar > 20:
-                flags.append(f"High accrual ratio: {ar}% — earnings far exceed cash")
-                score -= 20
-            elif ar > 10:
-                flags.append(f"Elevated accrual ratio: {ar}% — watch earnings quality")
-                score -= 10
-
-    # Margins
-    margins_by_year = []
-    for d in sd:
-        if is_valid(d.get('ebitda')) and is_valid(d.get('revenue')) and d['revenue'] > 0:
-            margins_by_year.append((d['year'], round(d['ebitda'] / d['revenue'] * 100, 1)))
-    det['margins_by_year'] = margins_by_year
-    margin_vals = [m[1] for m in margins_by_year]
-    if len(margin_vals) >= 2 and margin_vals[-1] > margin_vals[0] + 2:
-        det['margin_trend'] = 'expanding'
-    elif len(margin_vals) >= 2 and margin_vals[-1] < margin_vals[0] - 3:
-        det['margin_trend'] = 'contracting'
-    else:
-        det['margin_trend'] = 'stable'
-
-    # NEW: Interest coverage trend
-    det['int_cov_trend'] = []
-    for d in sd:
-        ebit_d = d.get('ebit')
-        int_d = d.get('interest_expense')
-        if is_valid(ebit_d) and is_valid(int_d) and int_d > 0:
-            det['int_cov_trend'].append((d['year'], round(ebit_d / int_d, 1)))
-
-    # CCC
-    ccc_latest = None
-    ccc_prior = None
-    for d in sd:
-        rev = d.get('revenue')
-        if not (is_valid(rev) and rev > 0):
+        if col_dt is None:
             continue
-        recv = d.get('receivables') if is_valid(d.get('receivables')) else 0
-        inv = d.get('inventory') if is_valid(d.get('inventory')) else 0
-        pay = d.get('payables') if is_valid(d.get('payables')) else 0
-        dr = round(recv / rev * 365, 1)
-        di = round(inv / rev * 365, 1)
-        dp = round(pay / rev * 365, 1)
-        ccc = round(dr + di - dp, 1)
-        ccc_prior = ccc_latest
-        ccc_latest = {'days_recv': dr, 'days_inv': di, 'days_pay': dp, 'ccc': ccc, 'year': d['year']}
-    det['ccc'] = ccc_latest
-    det['ccc_trend'] = None
+
+        delta = abs((col_dt - target_dt).days)
+
+        if delta == 0:
+            return col
+
+        if delta <= tolerance_days:
+            candidates.append((delta, col))
+
+    return min(candidates, key=lambda x: x[0])[1] if candidates else None
+
+
+def latest_statement_column(df: pd.DataFrame | None) -> Any | None:
+    if df is None or df.empty:
+        return None
+
+    dated = [
+        (pd.Timestamp(c), c)
+        for c in df.columns
+        if _statement_date(c) is not None
+    ]
+
+    return max(dated, key=lambda x: x[0])[1] if dated else df.columns[0]
+
+
+# =============================================================================
+# FINANCIAL FIELD GETTERS
+# =============================================================================
+def get_revenue(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    value = safe_get(
+        fin,
+        ("Total Revenue", "Operating Revenue", "Revenue", "Net Revenue"),
+        col
+    )
+
+    return value if is_valid(value) and value > 0 else None
+
+
+def get_net_income(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        fin,
+        (
+            "Net Income Common Stockholders",
+            "Net Income",
+            "Net Income Continuous Operations"
+        ),
+        col
+    )
+
+
+def get_ebitda(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(fin, ("EBITDA", "Normalized EBITDA"), col)
+
+
+def get_ebit(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        fin,
+        ("EBIT", "Operating Income", "Operating Profit", "Normalized EBIT"),
+        col
+    )
+
+
+def get_cost_of_revenue(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    value = safe_get(
+        fin,
+        (
+            "Cost Of Revenue",
+            "Cost of Goods Sold",
+            "Cost Of Goods And Services Sold"
+        ),
+        col
+    )
+
+    return abs(value) if is_valid(value) else None
+
+
+def get_equity(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    value = safe_get(
+        bs,
+        (
+            "Stockholders Equity",
+            "Total Stockholders Equity",
+            "Common Stock Equity",
+            "Total Equity Gross Minority Interest"
+        ),
+        col
+    )
+
+    return value if is_valid(value) and value > 0 else None
+
+
+def get_total_assets(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(bs, "Total Assets", col)
+
+
+def get_current_liabilities(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(bs, "Current Liabilities", col)
+
+
+def get_cfo(cf: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        cf,
+        (
+            "Operating Cash Flow",
+            "Total Cash From Operating Activities",
+            "Cash Flow From Continuing Operating Activities"
+        ),
+        col
+    )
+
+
+def get_fcf(cf: pd.DataFrame | None, col: Any = 0) -> float | None:
+    """FCF = CFO - absolute capex. Never substitute CFO when capex is missing."""
+
+    reported = safe_get(cf, "Free Cash Flow", col)
+
+    if is_valid(reported):
+        return reported
+
+    cfo = get_cfo(cf, col)
+    capex = safe_get(cf, ("Capital Expenditure", "Capital Expenditures"), col)
+
+    if is_valid(cfo) and is_valid(capex):
+        return cfo - abs(capex)
+
+    return None
+
+
+def get_receivables(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        bs,
+        (
+            "Accounts Receivable",
+            "Net Receivables",
+            "Receivables",
+            "Accounts Receivable Net"
+        ),
+        col
+    )
+
+
+def get_inventory(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(bs, ("Inventory", "Inventories"), col)
+
+
+def get_payables(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        bs,
+        (
+            "Accounts Payable",
+            "Payables And Accrued Expenses",
+            "Current Accounts Payable"
+        ),
+        col
+    )
+
+
+def get_cash(bs: pd.DataFrame | None, col: Any = 0) -> float | None:
+    return safe_get(
+        bs,
+        (
+            "Cash And Cash Equivalents",
+            "Cash Cash Equivalents And Short Term Investments",
+            "Cash Financial",
+            "Cash And Short Term Investments"
+        ),
+        col
+    )
+
+
+def get_total_debt(
+    bs: pd.DataFrame | None,
+    col: Any = 0
+) -> tuple[float | None, str]:
+    """Return gross interest-bearing debt; never substitute net debt for gross debt."""
+
+    total = safe_get(
+        bs,
+        ("Total Debt", "Total Debt And Lease Obligations"),
+        col
+    )
+
+    if is_valid(total) and total >= 0:
+        return total, "total debt line"
+
+    short_debt = safe_get(
+        bs,
+        (
+            "Current Debt And Capital Lease Obligation",
+            "Current Debt",
+            "Short Term Debt",
+            "Current Portion Of Long Term Debt"
+        ),
+        col
+    )
+
+    long_debt = safe_get(
+        bs,
+        (
+            "Long Term Debt And Capital Lease Obligation",
+            "Long Term Debt"
+        ),
+        col
+    )
+
+    if (
+        is_valid(short_debt)
+        and is_valid(long_debt)
+        and short_debt >= 0
+        and long_debt >= 0
+    ):
+        return short_debt + long_debt, "short-term + long-term debt"
+
+    return None, "gross debt unavailable"
+
+
+def get_interest_expense(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    """Only accept gross interest/finance expense fields, not net interest income."""
+
+    value = safe_get(
+        fin,
+        (
+            "Interest Expense",
+            "Interest Expense Non Operating",
+            "Interest And Debt Expense",
+            "Finance Costs"
+        ),
+        col
+    )
+
+    return abs(value) if is_valid(value) else None
+
+
+def get_diluted_shares(
+    fin: pd.DataFrame | None,
+    qfin: pd.DataFrame | None,
+    bs: pd.DataFrame | None,
+    info: dict
+) -> float | None:
+    """Weighted-average diluted shares for EPS calculations only."""
+
+    for frame in (qfin, fin):
+        for field in ("Diluted Average Shares", "Basic Average Shares"):
+            value = safe_get(frame, field, 0)
+
+            if is_valid(value) and value > 0:
+                return value
+
+    # Last resort only; current shares are not identical to weighted-average shares.
+    value = safe_float(info.get("sharesOutstanding"))
+
+    return value if value and value > 0 else None
+
+
+def get_current_shares(bs: pd.DataFrame | None, info: dict) -> float | None:
+    """Current shares outstanding; do not use weighted-average EPS shares for market cap."""
+
+    value = safe_float(info.get("sharesOutstanding"))
+
+    if value and value > 0:
+        return value
+
+    for field in ("Ordinary Shares Number", "Share Issued"):
+        value = safe_get(bs, field, 0)
+
+        if is_valid(value) and value > 0:
+            return value
+
+    return None
+
+
+def get_eps(fin: pd.DataFrame | None, col: Any = 0) -> float | None:
+    value = safe_get(fin, "Diluted EPS", col)
+
+    if value is None:
+        value = safe_get(fin, "Basic EPS", col)
+
+    return value
+
+
+# =============================================================================
+# DATA FETCHING
+# =============================================================================
+@st.cache_data(ttl=3600, show_spinner=False)
+def fetch_stock(ticker: str) -> dict | None:
+    debug = {
+        "ticker": ticker,
+        "warnings": [],
+        "errors": [],
+        "sources": []
+    }
+
+    try:
+        security = yf.Ticker(ticker)
+
+        try:
+            info = dict(security.info or {})
+        except Exception as exc:
+            info = {}
+            debug["warnings"].append(
+                f"Yahoo info unavailable: {type(exc).__name__}"
+            )
+
+        statements: dict[str, pd.DataFrame | None] = {}
+
+        statement_getters = (
+            ("fin", ("income_stmt", "financials")),
+            ("bs", ("balance_sheet",)),
+            ("cf", ("cash_flow", "cashflow")),
+            ("qfin", ("quarterly_income_stmt", "quarterly_financials")),
+        )
+
+        for key, attributes in statement_getters:
+            raw = None
+            last_error = None
+
+            for attribute in attributes:
+                try:
+                    raw = getattr(security, attribute)
+
+                    if raw is not None and not raw.empty:
+                        debug["sources"].append(f"{key} from {attribute}")
+                        break
+
+                except Exception as exc:
+                    last_error = exc
+
+            statements[key] = raw.copy() if raw is not None and not raw.empty else None
+
+            if statements[key] is None and last_error is not None:
+                debug["warnings"].append(
+                    f"{key} unavailable: {type(last_error).__name__}"
+                )
+
+        try:
+            hist = security.history(period="1y", auto_adjust=True)
+
+            prices = (
+                hist["Close"].dropna()
+                if hist is not None and not hist.empty and "Close" in hist
+                else None
+            )
+
+        except Exception as exc:
+            prices = None
+            debug["warnings"].append(
+                f"Price history unavailable: {type(exc).__name__}"
+            )
+
+        if (
+            not is_valid(info.get("currentPrice"))
+            and prices is not None
+            and len(prices)
+        ):
+            info["currentPrice"] = float(prices.iloc[-1])
+            debug["sources"].append("Current price from adjusted history")
+
+        # Yahoo insider/institutional ownership is informational only.
+        # It is NOT treated as Indian promoter shareholding.
+        yahoo_holdings = {
+            "insider_pct": _normalise_yahoo_pct(info.get("heldPercentInsiders")),
+            "institutional_pct": _normalise_yahoo_pct(
+                info.get("heldPercentInstitutions")
+            ),
+        }
+
+        try:
+            major = security.major_holders
+            parsed = _parse_major_holders(major)
+
+            for key, value in parsed.items():
+                if value is not None:
+                    yahoo_holdings[key] = value
+
+        except Exception:
+            pass
+
+        if (
+            not any(
+                is_valid(info.get(k))
+                for k in (
+                    "currentPrice",
+                    "regularMarketPrice",
+                    "previousClose"
+                )
+            )
+            and all(
+                statements.get(k) is None
+                for k in ("fin", "bs", "cf")
+            )
+        ):
+            debug["errors"].append(
+                "No usable price or financial statements returned"
+            )
+            return None
+
+        debug["data_years"] = {
+            "annual_income_statement": (
+                statements["fin"].shape[1]
+                if statements["fin"] is not None else 0
+            ),
+            "quarterly_income_statement": (
+                statements["qfin"].shape[1]
+                if statements["qfin"] is not None else 0
+            ),
+            "balance_sheet": (
+                statements["bs"].shape[1]
+                if statements["bs"] is not None else 0
+            ),
+            "cash_flow": (
+                statements["cf"].shape[1]
+                if statements["cf"] is not None else 0
+            ),
+            "price_days": len(prices) if prices is not None else 0,
+        }
+
+        return {
+            **statements,
+            "info": info,
+            "prices": prices,
+            "yahoo_holdings": yahoo_holdings,
+            "debug": debug,
+        }
+
+    except Exception as exc:
+        debug["errors"].append(
+            f"Fetch failed: {type(exc).__name__}: {exc}"
+        )
+        return None
+
+
+def _normalise_yahoo_pct(value: Any) -> float | None:
+    value = safe_float(value)
+
+    if value is None:
+        return None
+
+    if 0 <= value <= 1:
+        return round(value * 100, 2)
+
+    if 0 <= value <= 100:
+        return round(value, 2)
+
+    return None
+
+
+def _parse_major_holders(frame: pd.DataFrame | None) -> dict:
+    out = {
+        "insider_pct": None,
+        "institutional_pct": None
+    }
+
+    if frame is None or frame.empty:
+        return out
+
+    for idx, row in frame.iterrows():
+        label_parts = [str(idx)] + [
+            str(v) for v in row.values if isinstance(v, str)
+        ]
+
+        label = " ".join(label_parts).lower()
+
+        numeric = [safe_float(v) for v in row.values]
+        numeric = [v for v in numeric if v is not None]
+
+        if not numeric:
+            continue
+
+        value = numeric[0]
+        pct = _normalise_yahoo_pct(value)
+
+        if pct is None:
+            continue
+
+        if "insider" in label:
+            out["insider_pct"] = pct
+
+        elif (
+            "institution" in label
+            and "float" not in label
+            and "number" not in label
+        ):
+            out["institutional_pct"] = pct
+
+    return out
+
+
+# =============================================================================
+# STATEMENT ALIGNMENT AND CORE METRICS
+# =============================================================================
+def build_multi(
+    fin: pd.DataFrame | None,
+    bs: pd.DataFrame | None,
+    cf: pd.DataFrame | None
+) -> tuple[list[dict], list[str]]:
+    """Create annual records by matching actual statement reporting dates."""
+
+    warnings_list: list[str] = []
+
+    if fin is None or bs is None or cf is None:
+        return [], ["One or more annual statements are unavailable"]
+
+    records = []
+
+    for fcol in fin.columns:
+        dt = _statement_date(fcol)
+
+        if dt is None:
+            continue
+
+        bcol = _match_statement_column(bs, fcol)
+        ccol = _match_statement_column(cf, fcol)
+
+        if bcol is None or ccol is None:
+            warnings_list.append(
+                f"Could not align all statements for {dt.date()}; period skipped"
+            )
+            continue
+
+        records.append({
+            "period_end": dt,
+            "year": fy_label(dt) or str(dt.year),
+            "revenue": get_revenue(fin, fcol),
+            "net_income": get_net_income(fin, fcol),
+            "eps": get_eps(fin, fcol),
+            "ebitda": get_ebitda(fin, fcol),
+            "ebit": get_ebit(fin, fcol),
+            "cost_of_revenue": get_cost_of_revenue(fin, fcol),
+            "receivables": get_receivables(bs, bcol),
+            "inventory": get_inventory(bs, bcol),
+            "equity": get_equity(bs, bcol),
+            "current_liabilities": get_current_liabilities(bs, bcol),
+            "total_assets": get_total_assets(bs, bcol),
+            "cfo": get_cfo(cf, ccol),
+            "payables": get_payables(bs, bcol),
+            "interest_expense": get_interest_expense(fin, fcol),
+            "cash": get_cash(bs, bcol),
+            "debt": get_total_debt(bs, bcol)[0],
+            "debt_source": get_total_debt(bs, bcol)[1],
+        })
+
+    records.sort(key=lambda x: x["period_end"])
+
+    if len(records) < 2:
+        warnings_list.append(
+            "Fewer than two aligned annual periods are available"
+        )
+
+    # Compute ROE/ROCE using average capital where a prior period exists.
+    for i, row in enumerate(records):
+        prior = records[i - 1] if i > 0 else None
+
+        avg_eq = (
+            (row["equity"] + prior["equity"]) / 2
+            if prior
+            and is_valid(row["equity"])
+            and is_valid(prior["equity"])
+            else row["equity"]
+        )
+
+        ce_now = (
+            row["total_assets"] - row["current_liabilities"]
+            if is_valid(row["total_assets"])
+            and is_valid(row["current_liabilities"])
+            else None
+        )
+
+        ce_prior = (
+            prior["total_assets"] - prior["current_liabilities"]
+            if prior
+            and is_valid(prior.get("total_assets"))
+            and is_valid(prior.get("current_liabilities"))
+            else None
+        )
+
+        avg_ce = (
+            (ce_now + ce_prior) / 2
+            if is_valid(ce_now) and is_valid(ce_prior)
+            else ce_now
+        )
+
+        row["roe"] = (
+            row["net_income"] / avg_eq * 100
+            if is_valid(row["net_income"])
+            and is_valid(avg_eq)
+            and avg_eq > 0
+            else None
+        )
+
+        row["roce"] = (
+            row["ebit"] / avg_ce * 100
+            if is_valid(row["ebit"])
+            and is_valid(avg_ce)
+            and avg_ce > 0
+            else None
+        )
+
+    return records, warnings_list
+
+
+def annual_cagr(
+    frame: pd.DataFrame | None,
+    getter: Callable,
+    min_years: float = 2.5
+) -> tuple[float | None, str, str]:
+    """Calculate multi-year CAGR only with positive, complete observations."""
+
+    if frame is None or frame.shape[1] < 3:
+        return None, "", "Insufficient annual history"
+
+    values = []
+
+    for col in frame.columns:
+        dt = _statement_date(col)
+        value = getter(frame, col)
+
+        if dt is not None and is_valid(value):
+            values.append((dt, float(value)))
+
+    values.sort(key=lambda x: x[0])
+
+    if len(values) < 3:
+        return None, "", "Fewer than three valid annual observations"
+
+    start_dt, start_value = values[0]
+    end_dt, end_value = values[-1]
+
+    years = (end_dt - start_dt).days / 365.25
+
+    if years < min_years or start_value <= 0 or end_value <= 0:
+        return None, "", "Invalid or short annual period"
+
+    if any(v <= 0 for _, v in values):
+        return None, "", "Non-positive intermediate value; CAGR not meaningful"
+
+    cagr = ((end_value / start_value) ** (1 / years) - 1) * 100
+
+    if not is_valid(cagr) or cagr <= -99 or cagr > 500:
+        return None, "", "CAGR outside validation range"
+
+    label = f"{fy_label(start_dt)}–{fy_label(end_dt)}"
+
+    return (
+        round(cagr, 1),
+        label,
+        f"Annual CAGR over {years:.1f} years"
+    )
+
+
+def quarterly_ttm_yoy(
+    qfin: pd.DataFrame | None,
+    getter: Callable
+) -> tuple[float | None, str, str]:
+    """Use latest 4 quarters vs preceding 4 quarters; never compare overlapping windows."""
+
+    if qfin is None or qfin.shape[1] < 8:
+        return None, "", "At least eight quarterly observations required"
+
+    cols = sorted(
+        [
+            (_statement_date(c), c)
+            for c in qfin.columns
+            if _statement_date(c) is not None
+        ],
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    if len(cols) < 8:
+        return None, "", "At least eight dated quarterly observations required"
+
+    latest_cols = [c for _, c in cols[:4]]
+    prior_cols = [c for _, c in cols[4:8]]
+
+    latest_vals = [getter(qfin, c) for c in latest_cols]
+    prior_vals = [getter(qfin, c) for c in prior_cols]
+
+    if any(
+        not is_valid(v) or v <= 0
+        for v in latest_vals + prior_vals
+    ):
+        return None, "", "Incomplete or non-positive TTM observations"
+
+    latest_ttm = sum(latest_vals)
+    prior_ttm = sum(prior_vals)
+
+    if prior_ttm <= 0:
+        return None, "", "Prior TTM denominator is non-positive"
+
+    growth = (latest_ttm / prior_ttm - 1) * 100
+
+    if is_valid(growth):
+        return (
+            round(growth, 1),
+            "TTM YoY (1Y proxy)",
+            "TTM growth proxy; not a multi-year CAGR"
+        )
+
+    return None, "", "Growth unavailable"
+
+
+def current_price(data: dict) -> float | None:
+    info = data["info"]
+
+    for key in ("currentPrice", "regularMarketPrice", "previousClose"):
+        value = safe_float(info.get(key))
+
+        if value and value > 0:
+            return value
+
+    prices = data.get("prices")
+
+    if prices is not None and len(prices):
+        value = safe_float(prices.iloc[-1])
+        return value if value and value > 0 else None
+
+    return None
+
+
+def current_market_cap(
+    data: dict,
+    price: float | None
+) -> tuple[float | None, str]:
+    reported = safe_float(data["info"].get("marketCap"))
+
+    if reported is not None and reported > 0:
+        shares = get_current_shares(data.get("bs"), data["info"])
+
+        if shares and price:
+            computed = shares * price
+
+            if (
+                computed > 0
+                and max(reported / computed, computed / reported) > 3
+            ):
+                data["debug"]["warnings"].append(
+                    "Reported market cap differs from price × current shares by more than 3x; verify share units"
+                )
+
+        return reported, "Yahoo reported market cap"
+
+    shares = get_current_shares(data.get("bs"), data["info"])
+
+    if price and shares:
+        return price * shares, "Price × current shares"
+
+    return None, "Market cap unavailable"
+
+
+def _annual_pe_from_quarters(
+    data: dict,
+    price: float
+) -> tuple[float | None, str]:
+    qfin = data.get("qfin")
+
+    if qfin is None or qfin.shape[1] < 4:
+        return None, "not calculable"
+
+    cols = sorted(
+        [
+            (_statement_date(c), c)
+            for c in qfin.columns
+            if _statement_date(c) is not None
+        ],
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    if len(cols) < 4:
+        return None, "not calculable"
+
+    vals = [
+        get_net_income(qfin, c)
+        for _, c in cols[:4]
+    ]
+
+    if any(not is_valid(v) for v in vals):
+        return None, "incomplete TTM net income"
+
+    ttm_ni = sum(vals)
+
+    shares = get_diluted_shares(
+        data.get("fin"),
+        qfin,
+        data.get("bs"),
+        data["info"]
+    )
+
+    if ttm_ni > 0 and shares and shares > 0:
+        eps = ttm_ni / shares
+        pe = price / eps if eps > 0 else None
+
+        if is_valid(pe) and pe > 0:
+            return round(pe, 1), "price / TTM diluted EPS"
+
+    return None, "non-positive TTM earnings"
+
+
+def extract_pe(
+    data: dict,
+    price: float | None
+) -> tuple[float | None, str]:
+    info = data["info"]
+
+    trailing = safe_float(info.get("trailingPE"))
+
+    if trailing is not None and trailing > 0:
+        return round(trailing, 2), "Yahoo trailing P/E"
+
+    if price and price > 0:
+        pe, source = _annual_pe_from_quarters(data, price)
+
+        if pe is not None:
+            return pe, source
+
+        forward = safe_float(info.get("forwardPE"))
+
+        if forward is not None and forward > 0:
+            return round(forward, 2), "Yahoo forward P/E (fallback)"
+
+    return None, "P/E unavailable"
+
+
+def extract_debt_to_equity(
+    data: dict,
+    multi: list[dict]
+) -> tuple[float | None, str]:
+    """Use statement-derived gross debt / positive equity; no ambiguous Yahoo unit conversion."""
+
+    if not multi:
+        return None, "No aligned balance sheet"
+
+    latest = multi[-1]
+    debt = latest.get("debt")
+    equity = latest.get("equity")
+
+    if (
+        not is_valid(debt)
+        or not is_valid(equity)
+        or debt < 0
+        or equity <= 0
+    ):
+        return None, latest.get("debt_source", "Gross debt/equity unavailable")
+
+    return debt / equity, latest.get("debt_source", "Balance sheet")
+
+
+def extract_interest_coverage(
+    data: dict,
+    multi: list[dict]
+) -> tuple[float | None, str]:
+    if multi:
+        latest = multi[-1]
+        ebit = latest.get("ebit")
+        interest = latest.get("interest_expense")
+
+        if is_valid(ebit) and is_valid(interest) and interest > 0:
+            return ebit / interest, "EBIT / gross interest expense"
+
+        if (
+            is_valid(interest)
+            and interest == 0
+            and is_valid(ebit)
+            and ebit >= 0
+        ):
+            return None, "Zero interest expense; coverage not meaningful"
+
+    # Yahoo's precomputed ratio is a last-resort informational fallback.
+    info_value = safe_float(data["info"].get("interestCoverage"))
+
+    if info_value is not None and info_value >= 0:
+        return info_value, "Yahoo interestCoverage fallback"
+
+    return None, "Not calculable"
+
+
+def extract_one_year_return(data: dict) -> float | None:
+    prices = data.get("prices")
+
+    if prices is None or len(prices) < 200:
+        return None
+
+    try:
+        end_date = pd.Timestamp(prices.index[-1])
+        target = end_date - pd.Timedelta(days=365)
+        earlier = prices.loc[prices.index <= target]
+
+        if earlier.empty:
+            return None
+
+        end_value = float(prices.iloc[-1])
+        start_value = float(earlier.iloc[-1])
+
+        if start_value <= 0:
+            return None
+
+        return (end_value / start_value - 1) * 100
+
+    except Exception:
+        return None
+
+
+# =============================================================================
+# FUNDAMENTAL SCREEN
+# =============================================================================
+def is_financial_company(info: dict, ticker: str = "") -> bool:
+    sector = str(info.get("sector") or "").lower()
+    industry = str(info.get("industry") or "").lower()
+    name = str(
+        info.get("shortName") or info.get("longName") or ticker
+    ).lower()
+
+    joined = f" {sector} {industry} {name} "
+
+    return any(keyword in joined for keyword in BANKING_KW)
+
+
+def run_layer1(
+    data: dict,
+    ticker: str,
+    multi: list[dict]
+) -> dict:
+    info = data["info"]
+
+    price = current_price(data)
+    mcap, mcap_source = current_market_cap(data, price)
+    mcap_cr = mcap / 1e7 if is_valid(mcap) else None
+
+    latest = multi[-1] if multi else {}
+
+    roe = latest.get("roe")
+    roce = latest.get("roce")
+
+    de, de_source = extract_debt_to_equity(data, multi)
+    int_cov, int_cov_source = extract_interest_coverage(data, multi)
+
+    sales, sales_label, sales_source = annual_cagr(
+        data.get("fin"), get_revenue
+    )
+
+    if sales is None:
+        sales, sales_label, sales_source = quarterly_ttm_yoy(
+            data.get("qfin"), get_revenue
+        )
+
+    pat, pat_label, pat_source = annual_cagr(
+        data.get("fin"), get_net_income
+    )
+
+    if pat is None:
+        pat, pat_label, pat_source = quarterly_ttm_yoy(
+            data.get("qfin"), get_net_income
+        )
+
+    eps_growth, eps_label, eps_source = annual_cagr(
+        data.get("fin"), get_eps
+    )
+
+    if eps_growth is None:
+        eps_growth, eps_label, eps_source = quarterly_ttm_yoy(
+            data.get("qfin"), get_eps
+        )
+
+    pe, pe_source = extract_pe(data, price)
+
+    growth_floor = 15.0
+
+    relaxed = bool(
+        is_valid(roe)
+        and roe > 25
+        and is_valid(mcap)
+        and mcap > 500e9
+    )
+
+    if relaxed:
+        growth_floor = 10.0
+
+    checks = {
+        "mcap_pass": is_valid(mcap) and mcap >= 150e9,
+        "roe_pass": is_valid(roe) and roe > 15,
+        "roce_pass": is_valid(roce) and roce > 18,
+
+        # UPDATED: D/E must be strictly below 1.00x.
+        "de_pass": (
+            is_valid(de)
+            and de >= 0
+            and de < MAX_DEBT_TO_EQUITY
+        ),
+
+        "growth_pass": (
+            is_valid(sales)
+            and is_valid(pat)
+            and sales > growth_floor
+            and pat > growth_floor
+        ),
+    }
+
+    fundamental_pass = all(checks.values())
+
+    return {
+        "ticker": ticker,
+        "name": str(
+            info.get("shortName")
+            or info.get("longName")
+            or ticker.replace(".NS", "")
+        ),
+        "sector": str(info.get("sector") or info.get("industry") or "Unknown"),
+        "price": price,
+        "mcap": mcap,
+        "mcap_cr": mcap_cr,
+        "mcap_source": mcap_source,
+        "pe": pe,
+        "pe_source": pe_source,
+        "de": de,
+        "de_source": de_source,
+        "roe": roe,
+        "roce": roce,
+        "int_cov": int_cov,
+        "int_cov_source": int_cov_source,
+        "sales_cagr": sales,
+        "sales_label": sales_label,
+        "sales_source": sales_source,
+        "pat_cagr": pat,
+        "pat_label": pat_label,
+        "pat_source": pat_source,
+        "eps_growth": eps_growth,
+        "eps_label": eps_label,
+        "eps_source": eps_source,
+        "growth_floor": growth_floor,
+        "growth_relaxed": relaxed,
+        **checks,
+        "pass": fundamental_pass,
+    }
+
+
+# =============================================================================
+# FORENSIC ACCOUNTING AND WORKING CAPITAL
+# =============================================================================
+def _ratio(num: Any, den: Any) -> float | None:
+    if is_valid(num) and is_valid(den) and float(den) != 0:
+        return float(num) / float(den)
+
+    return None
+
+
+def run_forensic(records: list[dict]) -> dict:
+    if len(records) < 2:
+        return {
+            "score": None,
+            "flags": ["Insufficient aligned annual data"],
+            "num_flags": 1,
+            "complete": False,
+            "cum_cfo_pat": None,
+            "cum_cfo_ebitda": None,
+            "accrual_ratio": None,
+            "ccc": None,
+            "ccc_trend": None,
+            "margins_by_year": [],
+            "margin_trend": "unavailable",
+            "cfo_ebitda_trend": []
+        }
+
+    rows = sorted(records, key=lambda x: x["period_end"])
+    flags: list[str] = []
+    deductions: dict[str, float] = {}
+
+    # Receivables / revenue trend: require three consecutive aligned periods.
+    receivables_pct = []
+
+    for row in rows:
+        ratio = _ratio(row.get("receivables"), row.get("revenue"))
+
+        receivables_pct.append(
+            ratio * 100
+            if is_valid(ratio) and row.get("revenue", 0) > 0
+            else None
+        )
+
+    valid_last3 = receivables_pct[-3:] if len(receivables_pct) >= 3 else []
+
+    if (
+        len(valid_last3) == 3
+        and all(is_valid(x) for x in valid_last3)
+        and valid_last3[0] < valid_last3[1] < valid_last3[2]
+    ):
+        flags.append(
+            "Receivables as a percentage of revenue rose in three consecutive years"
+        )
+        deductions["receivables"] = 15
+
+    # Inventory growth vs revenue growth, latest two aligned years.
+    latest, prior = rows[-1], rows[-2]
+
+    inv_latest, inv_prior = latest.get("inventory"), prior.get("inventory")
+    rev_latest, rev_prior = latest.get("revenue"), prior.get("revenue")
+
+    inv_growth = rev_growth = None
+
+    if all(
+        is_valid(x) and x > 0
+        for x in (inv_latest, inv_prior, rev_latest, rev_prior)
+    ):
+        inv_growth = (inv_latest / inv_prior - 1) * 100
+        rev_growth = (rev_latest / rev_prior - 1) * 100
+
+        if inv_growth >= rev_growth + 10:
+            flags.append(
+                f"Inventory growth ({inv_growth:.1f}%) exceeded revenue growth ({rev_growth:.1f}%) by at least 10 percentage points"
+            )
+            deductions["inventory"] = 15
+
+    # Multi-year cash conversion: paired observations only, >=3 years.
+    paired_pat = [
+        r for r in rows
+        if is_valid(r.get("cfo")) and is_valid(r.get("net_income"))
+    ]
+
+    paired_ebitda = [
+        r for r in rows
+        if is_valid(r.get("cfo")) and is_valid(r.get("ebitda"))
+    ]
+
+    cum_cfo_pat = cum_cfo_ebitda = None
+    cash_deductions = 0.0
+
+    paired_years_sufficient = (
+        len(paired_pat) >= 3 and len(paired_ebitda) >= 3
+    )
+
+    complete = False
+
+    if len(paired_pat) >= 3:
+        total_cfo_pat = sum(r["cfo"] for r in paired_pat)
+        total_pat = sum(r["net_income"] for r in paired_pat)
+
+        if total_pat > 0:
+            cum_cfo_pat = total_cfo_pat / total_pat
+
+            if cum_cfo_pat < 0.5:
+                flags.append(
+                    f"Critical cumulative CFO/PAT: {cum_cfo_pat:.2f}x"
+                )
+                cash_deductions += 30
+
+            elif cum_cfo_pat < 0.7:
+                flags.append(
+                    f"Weak cumulative CFO/PAT: {cum_cfo_pat:.2f}x"
+                )
+                cash_deductions += 20
+
+    if len(paired_ebitda) >= 3:
+        total_cfo_ebitda = sum(r["cfo"] for r in paired_ebitda)
+        total_ebitda = sum(r["ebitda"] for r in paired_ebitda)
+
+        if total_ebitda > 0:
+            cum_cfo_ebitda = total_cfo_ebitda / total_ebitda
+
+            if cum_cfo_ebitda < 0.5:
+                flags.append(
+                    f"Critical cumulative CFO/EBITDA: {cum_cfo_ebitda:.2f}x"
+                )
+                cash_deductions += 20
+
+            elif cum_cfo_ebitda < 0.7:
+                flags.append(
+                    f"Weak cumulative CFO/EBITDA: {cum_cfo_ebitda:.2f}x"
+                )
+                cash_deductions += 15
+
+    cfo_ebitda_trend = []
+
+    for row in rows:
+        ratio = _ratio(row.get("cfo"), row.get("ebitda"))
+
+        if is_valid(ratio) and row.get("ebitda", 0) > 0:
+            cfo_ebitda_trend.append((row["year"], ratio))
+
+    if (
+        len(cfo_ebitda_trend) >= 2
+        and is_valid(cum_cfo_ebitda)
+        and cfo_ebitda_trend[-1][1] < cfo_ebitda_trend[-2][1]
+        and cfo_ebitda_trend[-1][1] < 0.5
+        and cum_cfo_ebitda < 0.7
+    ):
+        flags.append("CFO/EBITDA conversion deteriorated in the latest year")
+        cash_deductions += 10
+
+    if len([r for r in rows if is_valid(r.get("cfo"))]) >= 3:
+        cumulative_cfo = sum(
+            r["cfo"] for r in rows if is_valid(r.get("cfo"))
+        )
+
+        if cumulative_cfo < 0:
+            flags.append("Cumulative operating cash flow is negative")
+            cash_deductions += 25
+
+    # Accrual ratio: latest year using average total assets.
+    accrual_ratio = None
+
+    if (
+        is_valid(latest.get("net_income"))
+        and is_valid(latest.get("cfo"))
+    ):
+        ta_now, ta_prior = (
+            latest.get("total_assets"),
+            prior.get("total_assets")
+        )
+
+        if (
+            is_valid(ta_now)
+            and is_valid(ta_prior)
+            and ta_now > 0
+            and ta_prior > 0
+        ):
+            avg_assets = (ta_now + ta_prior) / 2
+
+            accrual_ratio = (
+                latest["net_income"] - latest["cfo"]
+            ) / avg_assets * 100
+
+            if accrual_ratio > 20:
+                flags.append(
+                    f"High accrual ratio: {accrual_ratio:.1f}%"
+                )
+                cash_deductions += 20
+
+            elif accrual_ratio > 10:
+                flags.append(
+                    f"Elevated accrual ratio: {accrual_ratio:.1f}%"
+                )
+                cash_deductions += 10
+
+    # Avoid repeatedly subtracting more than 50 points for overlapping symptoms.
+    cash_deductions = min(cash_deductions, 50)
+
+    score = max(
+        0.0,
+        100.0
+        - deductions.get("receivables", 0)
+        - deductions.get("inventory", 0)
+        - cash_deductions
+    )
+
+    complete = (
+        paired_years_sufficient
+        and is_valid(cum_cfo_pat)
+        and is_valid(cum_cfo_ebitda)
+    )
+
+    # EBITDA margins.
+    margins = []
+
+    for row in rows:
+        ratio = _ratio(row.get("ebitda"), row.get("revenue"))
+
+        if is_valid(ratio) and row.get("revenue", 0) > 0:
+            margins.append((row["year"], ratio * 100))
+
+    margin_trend = "stable"
+
+    if len(margins) >= 2:
+        if margins[-1][1] > margins[0][1] + 2:
+            margin_trend = "expanding"
+        elif margins[-1][1] < margins[0][1] - 3:
+            margin_trend = "contracting"
+
+    # Cash conversion cycle: average balance sheet values.
+    # DSO uses revenue; DIO and DPO use cost of revenue.
+    ccc_rows = []
+
+    for i, row in enumerate(rows):
+        previous = rows[i - 1] if i > 0 else None
+
+        if previous is None:
+            continue
+
+        revenue = row.get("revenue")
+        cogs = row.get("cost_of_revenue")
+
+        required = (
+            row.get("receivables"),
+            previous.get("receivables"),
+            row.get("inventory"),
+            previous.get("inventory"),
+            row.get("payables"),
+            previous.get("payables"),
+            revenue,
+            cogs
+        )
+
+        if not all(is_valid(v) for v in required) or revenue <= 0 or cogs <= 0:
+            continue
+
+        avg_receivables = (
+            row["receivables"] + previous["receivables"]
+        ) / 2
+
+        avg_inventory = (
+            row["inventory"] + previous["inventory"]
+        ) / 2
+
+        avg_payables = (
+            row["payables"] + previous["payables"]
+        ) / 2
+
+        dso = avg_receivables / revenue * 365
+        dio = avg_inventory / cogs * 365
+        dpo = avg_payables / cogs * 365
+
+        ccc_rows.append({
+            "year": row["year"],
+            "dso": dso,
+            "dio": dio,
+            "dpo": dpo,
+            "ccc": dso + dio - dpo
+        })
+
+    ccc_latest = ccc_rows[-1] if ccc_rows else None
+    ccc_prior = ccc_rows[-2] if len(ccc_rows) >= 2 else None
+    ccc_trend = None
+
     if ccc_latest and ccc_prior:
-        diff = ccc_latest['ccc'] - ccc_prior['ccc']
-        det['ccc_trend'] = 'improving' if diff < -5 else 'worsening' if diff > 10 else 'stable'
-        if ccc_prior['days_pay'] > 0:
-            dp_growth = (ccc_latest['days_pay'] / ccc_prior['days_pay'] - 1) * 100
-            if dp_growth > 30 and is_valid(det.get('cum_cfo_pat')) and det['cum_cfo_pat'] < 0.7:
-                flags.append(f"Payables stretch: +{dp_growth:.0f}% YoY with weak cash ({det['cum_cfo_pat']}x)")
+        change = ccc_latest["ccc"] - ccc_prior["ccc"]
 
-    det['score'] = max(score, 0)
-    det['flags'] = flags
-    det['num_flags'] = len(flags)
-    return det
+        ccc_trend = (
+            "worsening" if change > 10
+            else "improving" if change < -5
+            else "stable"
+        )
 
-# ============================================================
-# PROMOTER / HOLDINGS ANALYSIS (NEW — leading indicator)
-# ============================================================
-def run_holdings_analysis(holdings):
-    """Analyse holdings data for red flags. Returns enriched holdings dict."""
-    result = dict(holdings)
-    result['flags'] = []
-    result['score_adj'] = 0
+        if ccc_prior["dpo"] > 0:
+            dpo_growth = (
+                ccc_latest["dpo"] / ccc_prior["dpo"] - 1
+            ) * 100
 
-    insider = holdings.get('insider_pct')
-    inst = holdings.get('inst_pct')
+            if (
+                dpo_growth > 30
+                and is_valid(cum_cfo_pat)
+                and cum_cfo_pat < 0.7
+            ):
+                flags.append(
+                    f"Payables stretch: DPO increased {dpo_growth:.0f}% while cumulative CFO/PAT is weak"
+                )
 
-    if is_valid(insider):
-        if insider < 20:
-            result['flags'].append(f"Very low promoter/insider holding: {insider}%")
-            result['score_adj'] -= 10
-        elif insider > 75:
-            result['flags'].append(f"Very high promoter holding: {insider}% — low float, governance risk")
-            result['score_adj'] -= 5
+    return {
+        "score": round(score),
+        "flags": flags,
+        "num_flags": len(flags),
+        "complete": complete,
+        "paired_pat_years": len(paired_pat),
+        "paired_ebitda_years": len(paired_ebitda),
+        "cum_cfo_pat": cum_cfo_pat,
+        "cum_cfo_ebitda": cum_cfo_ebitda,
+        "accrual_ratio": accrual_ratio,
+        "cfo_ebitda_trend": cfo_ebitda_trend,
+        "margins_by_year": margins,
+        "margin_trend": margin_trend,
+        "ccc": ccc_latest,
+        "ccc_trend": ccc_trend,
+        "receivables_pct": receivables_pct,
+        "cash_deduction_capped": cash_deductions,
+    }
 
-    if is_valid(inst):
-        if inst < 5:
-            result['flags'].append(f"Negligible institutional ownership: {inst}% — no external oversight")
-            result['score_adj'] -= 5
+
+# =============================================================================
+# MOAT PROXY, CYCLICALITY, EPS MOMENTUM
+# =============================================================================
+def run_moat(records: list[dict]) -> dict:
+    rows = sorted(records, key=lambda x: x["period_end"])
+
+    roe_rows = [
+        (r["year"], r.get("roe"))
+        for r in rows
+        if is_valid(r.get("roe"))
+    ]
+
+    if not roe_rows:
+        return {
+            "pct": 0,
+            "consistency": "no data",
+            "years_above_15": 0,
+            "total_years": 0,
+            "roe_by_year": []
+        }
+
+    values = [v for _, v in roe_rows]
+    above = sum(v > 15 for v in values)
+    total = len(values)
+    pct = round(above / total * 100)
+
+    if total >= 5 and above == total:
+        consistency = "established moat proxy"
+
+    elif (
+        total >= 2
+        and values[-1] > 15
+        and values[-2] > 15
+        and values[-1] > values[0]
+    ):
+        consistency = "emerging moat proxy"
+
+    else:
+        consistency = "weak/unproven moat"
+
+    return {
+        "pct": pct,
+        "consistency": consistency,
+        "years_above_15": above,
+        "total_years": total,
+        "roe_by_year": roe_rows,
+    }
+
+
+def run_cyclical(records: list[dict]) -> dict:
+    rows = sorted(records, key=lambda x: x["period_end"])
+
+    values = [
+        (r["year"], r.get("roe"))
+        for r in rows
+        if is_valid(r.get("roe"))
+    ]
+
+    if len(values) < 4:
+        return {
+            "peak": False,
+            "latest": values[-1][1] if values else None,
+            "average_prior": None,
+            "median": None,
+            "roe_by_year": values,
+            "note": "At least four annual ROE observations required"
+        }
+
+    historical = [v for _, v in values[:-1]]
+    latest = values[-1][1]
+    avg_prior = float(np.mean(historical))
+    median = float(np.median(historical))
+
+    peak = avg_prior > 0 and latest > 2 * avg_prior and latest > 20
+
+    return {
+        "peak": peak,
+        "latest": latest,
+        "average_prior": avg_prior,
+        "median": median,
+        "roe_by_year": values,
+        "note": "Compared with prior-year average"
+    }
+
+
+def _quarter_eps(qfin: pd.DataFrame | None) -> list[tuple[pd.Timestamp, float]]:
+    if qfin is None or qfin.empty:
+        return []
+
+    output = []
+
+    for col in qfin.columns:
+        dt = _statement_date(col)
+
+        if dt is None:
+            continue
+
+        eps = get_eps(qfin, col)
+
+        if is_valid(eps):
+            output.append((dt, float(eps)))
+
+    return sorted(output, key=lambda x: x[0], reverse=True)
+
+
+def _yoy_eps(current: float, prior: float) -> tuple[float | None, str]:
+    if prior > 0:
+        return (current / prior - 1) * 100, "calculable"
+
+    if current > 0 and prior <= 0:
+        return None, "turned profitable from zero/loss"
+
+    if current <= 0 and prior > 0:
+        return (current / prior - 1) * 100, "profit to loss/decline"
+
+    return None, "both periods loss-making or zero-base"
+
+
+def run_momentum(qfin: pd.DataFrame | None) -> dict:
+    eps_rows = _quarter_eps(qfin)
+
+    if len(eps_rows) < 6:
+        return {
+            "available": False,
+            "score": 40,
+            "latest_yoy": None,
+            "prior_yoy": None,
+            "status": "Insufficient quarterly EPS history",
+            "eps_rows": eps_rows
+        }
+
+    latest, prior_q = eps_rows[0][1], eps_rows[1][1]
+    same_q_last_year, prior_same_q_last_year = eps_rows[4][1], eps_rows[5][1]
+
+    latest_yoy, latest_status = _yoy_eps(latest, same_q_last_year)
+    prior_yoy, prior_status = _yoy_eps(prior_q, prior_same_q_last_year)
+
+    if is_valid(latest_yoy) and is_valid(prior_yoy):
+
+        if latest_yoy > 0 and prior_yoy > 0:
+            score = 85 if latest_yoy >= prior_yoy else 70
+
+            status = (
+                "Positive YoY EPS growth in both latest quarters"
+                if score == 85
+                else "Positive but decelerating YoY EPS growth"
+            )
+
+        elif latest_yoy < 0 and prior_yoy < 0:
+            score, status = 15, "Negative YoY EPS growth in both latest quarters"
+
+        else:
+            score, status = 40, "Mixed YoY EPS momentum"
+
+    elif (
+        "turned profitable" in latest_status
+        or "turned profitable" in prior_status
+    ):
+        score, status = 65, "Profitability transition; percentage growth not comparable"
+
+    else:
+        score, status = 40, "EPS growth not fully calculable"
+
+    return {
+        "available": True,
+        "score": score,
+        "latest_yoy": latest_yoy,
+        "prior_yoy": prior_yoy,
+        "latest_status": latest_status,
+        "prior_status": prior_status,
+        "status": status,
+        "eps_rows": eps_rows[:6],
+    }
+
+
+# =============================================================================
+# OWNERSHIP: YAHOO DATA IS INFORMATIONAL; PROMOTER DATA MUST BE VERIFIED
+# =============================================================================
+def load_ownership_overrides(uploaded_file) -> dict:
+    if uploaded_file is None:
+        return {}
+
+    try:
+        df = pd.read_csv(uploaded_file)
+        required = {"ticker", "promoter_pct"}
+
+        if not required.issubset({c.lower() for c in df.columns}):
+            st.sidebar.error(
+                "Ownership CSV needs ticker and promoter_pct columns."
+            )
+            return {}
+
+        df.columns = [c.lower().strip() for c in df.columns]
+        output = {}
+
+        for _, row in df.iterrows():
+            raw_ticker = row.get("ticker", "")
+
+            if pd.isna(raw_ticker) or not str(raw_ticker).strip():
+                continue
+
+            ticker = clean_ticker(raw_ticker)
+
+            output[ticker] = {
+                "promoter_pct": percentage_0_100(row.get("promoter_pct")),
+                "institutional_pct": percentage_0_100(row.get("institutional_pct")),
+                "promoter_pledge_pct": percentage_0_100(row.get("promoter_pledge_pct")),
+                "as_of": str(row.get("as_of", "")),
+                "source": str(row.get("source", "User-provided CSV")),
+            }
+
+        return output
+
+    except Exception as exc:
+        st.sidebar.error(f"Could not read ownership CSV: {exc}")
+        return {}
+
+
+def run_holdings_analysis(
+    yahoo_holdings: dict,
+    override: dict | None
+) -> dict:
+    override = override or {}
+
+    result = {
+        "yahoo_insider_pct": yahoo_holdings.get("insider_pct"),
+        "yahoo_institutional_pct": yahoo_holdings.get("institutional_pct"),
+        "promoter_pct": percentage_0_100(override.get("promoter_pct")),
+        "institutional_pct": percentage_0_100(override.get("institutional_pct")),
+        "promoter_pledge_pct": percentage_0_100(override.get("promoter_pledge_pct")),
+        "as_of": override.get("as_of", ""),
+        "source": override.get("source", ""),
+        "flags": [],
+        "score_adj": 0,
+    }
+
+    promoter = result["promoter_pct"]
+    inst = result["institutional_pct"]
+    pledge = result["promoter_pledge_pct"]
+
+    if is_valid(promoter):
+
+        if promoter < 20:
+            result["flags"].append(
+                f"Verified promoter holding is low ({promoter:.1f}%); maximum STANDARD tier"
+            )
+            result["score_adj"] = -10
+
+        elif promoter > 75:
+            result["flags"].append(
+                f"Verified promoter holding is highly concentrated ({promoter:.1f}%); review minority-shareholder governance"
+            )
+            result["score_adj"] = -5
+
+    else:
+        result["flags"].append(
+            "Verified promoter holding unavailable; Yahoo insider ownership is not a substitute"
+        )
+
+    if is_valid(inst) and inst < 5:
+        result["flags"].append(
+            f"Verified institutional ownership is low ({inst:.1f}%)"
+        )
+
+    if is_valid(pledge) and pledge > 0:
+        result["flags"].append(
+            f"Promoter pledge reported at {pledge:.1f}% of promoter holding; manual review required"
+        )
 
     return result
 
-# ============================================================
-# MOAT DURABILITY
-# ============================================================
-def run_moat(data):
-    sd = sorted(data, key=lambda x: x['year'])
-    rh = []
-    for d in sd:
-        if is_valid(d.get('net_income')) and is_valid(d.get('equity')) and d['equity'] > 0:
-            rh.append((d['year'], round(d['net_income'] / d['equity'] * 100, 1)))
-    if not rh:
-        return dict(DEFAULT_MOAT)
-    vals = [r[1] for r in rh]
-    above = sum(1 for v in vals if v > 15)
-    total = len(vals)
-    pct = round(above / total * 100) if total > 0 else 0
-    if above == total and total >= 2:
-        cons = 'established moat'
-    elif len(vals) >= 2 and vals[-1] > 15 and vals[-2] > 15 and vals[-1] > vals[0]:
-        cons = 'emerging moat'
-    else:
-        cons = 'weak/no moat'
-    return {'years_above_15': above, 'total_years': total, 'pct': pct,
-            'consistency': cons, 'roe_by_year': rh, 'quarterly_roe': [], 'extended_total': total}
 
-# ============================================================
-# CYCLICAL ROE
-# ============================================================
-def run_cyclical(data):
-    sd = sorted(data, key=lambda x: x['year'])
-    rv = []
-    rby = {}
-    for d in sd:
-        if is_valid(d.get('net_income')) and is_valid(d.get('equity')) and d['equity'] > 0:
-            r = round(d['net_income'] / d['equity'] * 100, 1)
-            rv.append(r)
-            rby[d['year']] = r
-    if len(rv) < 2:
-        return dict(DEFAULT_CYC)
-    return {
-        'latest': rv[-1], 'avg': round(float(np.mean(rv)), 1),
-        'median': round(float(np.median(rv)), 1),
-        'peak': rv[-1] > float(np.mean(rv)) * 2 and rv[-1] > 20,
-        'values': rv, 'roe_by_year': rby,
-    }
+# =============================================================================
+# VALUATION
+# =============================================================================
+def run_valuation(
+    pe: float | None,
+    eps_growth: float | None,
+    sales_growth: float | None,
+    data: dict,
+    market_cap: float | None
+) -> dict:
+    peg = None
+    growth_used = None
+    turnaround_adjustment = False
 
-# ============================================================
-# EARNINGS MOMENTUM (improved edge-case handling)
-# ============================================================
-def run_momentum(qfin):
-    if qfin is None or qfin.shape[1] < 3:
-        return dict(DEFAULT_MOM)
-    ev = []
-    qs = []
-    for i in range(min(4, qfin.shape[1])):
-        e = safe_get(qfin, 'Diluted EPS', i) or safe_get(qfin, 'Basic EPS', i)
-        if e is not None:
-            ev.append(e)
-            try:
-                qs.append(qfin.columns[i].strftime('%b %Y'))
-            except Exception:
-                qs.append(str(i))
-    if len(ev) < 3:
-        return dict(DEFAULT_MOM)
-    # BUG FIX: handle zero and negative EPS safely
-    lq, pq = None, None
-    if ev[1] != 0:
-        lq_raw = (ev[0] / ev[1] - 1) * 100
-        if is_valid(lq_raw) and -500 < lq_raw < 500:
-            lq = round(lq_raw, 1)
-    if ev[2] != 0:
-        pq_raw = (ev[1] / ev[2] - 1) * 100
-        if is_valid(pq_raw) and -500 < pq_raw < 500:
-            pq = round(pq_raw, 1)
-    return {'available': True, 'latest_qoq': lq, 'prior_qoq': pq, 'eps': ev[:4], 'quarters': qs[:4]}
+    # PEG uses per-share earnings growth, not total PAT growth.
+    if (
+        is_valid(pe)
+        and pe > 0
+        and is_valid(eps_growth)
+        and eps_growth > 0
+    ):
+        growth_used = eps_growth
 
-# ============================================================
-# DUAL VALUATION
-# ============================================================
-def run_valuation(pe, pat_cagr, sales_cagr, price, mcap, sd):
-    peg, peg_growth, peg_turnaround = None, None, False
-    if is_valid(pe) and pe > 0:
-        growth = pat_cagr
-        if is_valid(pat_cagr) and is_valid(sales_cagr) and sales_cagr > 0 and pat_cagr > sales_cagr * 2:
-            growth = sales_cagr
-            peg_turnaround = True
-        if is_valid(growth) and growth > 0:
-            peg = round(pe / growth, 2)
-            peg_growth = growth
+        if (
+            is_valid(sales_growth)
+            and sales_growth > 0
+            and eps_growth > 2 * sales_growth
+        ):
+            growth_used = sales_growth
+            turnaround_adjustment = True
+
+        peg = pe / growth_used
+
     fcf_yield = None
-    cf = sd.get('cf')
-    if cf is not None and is_valid(mcap) and mcap > 0:
-        fcf = get_fcf(cf, 0)
+    cf = data.get("cf")
+
+    if is_valid(market_cap) and market_cap > 0 and cf is not None:
+        fcf = get_fcf(cf, latest_statement_column(cf))
+
         if is_valid(fcf):
-            fcf_yield = round(fcf / mcap * 100, 2)
-    return {'peg': peg, 'peg_growth': peg_growth, 'peg_turnaround': peg_turnaround, 'fcf_yield': fcf_yield}
+            fcf_yield = fcf / market_cap * 100
 
-# ============================================================
-# POSITION SIZING v4 (enhanced with holdings & interest coverage)
-# ============================================================
-def get_tier(score, nf, peak, peg, mom_1y, moat_cons, holdings=None, int_cov=None):
-    if score is None or score < 50:
-        return 'WATCH', '0%'
-    if is_valid(peg) and peg > 5:
-        return 'WATCH', '0%'
-    if is_valid(peg) and peg > 3:
-        return 'HALF', '4-6%'
-
-    # NEW: Holdings safety — very low promoter = cap at STANDARD
-    holdings_cap = None
-    if holdings and holdings.get('score_adj', 0) <= -10:
-        holdings_cap = 'STANDARD'
-
-    # NEW: Interest coverage safety — below 3x = cap at HALF
-    if is_valid(int_cov) and int_cov < 3:
-        return 'HALF', '4-6%'
-
-    moat_ok = moat_cons in ('established moat', 'emerging moat')
-    if score >= 85 and nf == 0 and not peak and moat_ok:
-        base = 'FULL'
-    elif score >= 85 and nf == 0 and not peak:
-        base = 'STANDARD'
-    elif score >= 70 and nf <= 1:
-        base = 'STANDARD'
-    else:
-        base = 'HALF'
-
-    # Apply holdings cap
-    tier_rank = {'WATCH': 0, 'HALF': 1, 'STANDARD': 2, 'FULL': 3}
-    if holdings_cap and tier_rank.get(base, 0) > tier_rank.get(holdings_cap, 0):
-        base = holdings_cap
-
-    if base == 'FULL' and not is_valid(peg):
-        return 'STANDARD', '8-10%'
-    if base == 'FULL' and peg < 0.5:
-        return 'FULL', '12-15%'
-    if base == 'FULL' and is_valid(mom_1y) and mom_1y < -30:
-        return 'HALF', '4-6%'
-    if base == 'FULL' and peg > 1.5:
-        return 'STANDARD', '8-10%'
-    return {'FULL': ('FULL', '12-15%'), 'STANDARD': ('STANDARD', '8-10%'), 'HALF': ('HALF', '4-6%')}[base]
-
-# ============================================================
-# VERDICT (enhanced)
-# ============================================================
-def gen_verdict(name, tier, l1, acct, cyc, val, ret, moat, is_bank, holdings=None):
-    if is_bank:
-        return (f"{name} is a banking/financial stock. This framework uses ROE, D/E, and "
-                f"CFO/EBITDA metrics for non-financials. Banks need NIM, CASA, Credit Cost, GNPA. Scores for reference only.")
-    peg = val.get('peg'); fy = val.get('fcf_yield'); roe = l1.get('roe'); de = l1.get('de')
-    cfo = acct.get('cum_cfo_pat'); mby = acct.get('margins_by_year', []); mt = acct.get('margin_trend', '')
-    mp = moat.get('pct', 0); mc = moat.get('consistency', '')
-    sc_v, sl = l1.get('sales_cagr'), l1.get('sales_cagr_label', '')
-    pc_v, pl = l1.get('pat_cagr'), l1.get('pat_cagr_label', '')
-    sents = []
-    if tier == 'FULL':
-        sents.append(f"{name} passes all layers with conviction.")
-    elif tier == 'STANDARD':
-        sents.append(f"{name} clears the quality bar but one or more factors prevent full conviction.")
-    elif tier == 'HALF':
-        sents.append(f"{name} presents a mixed profile — genuine strengths alongside flags that need resolution.")
-    else:
-        sents.append(f"{name} fails critical checks and does not warrant capital deployment at current readings.")
-    q = []
-    if is_valid(roe) and roe > 15:
-        q.append(f"ROE at {roe}%{' on ' + str(de) + 'x D/E' if is_valid(de) else ''}")
-    if is_valid(cfo) and cfo > 1.0:
-        q.append(f"cumulative cash conversion at {cfo}x — more cash than reported profit")
-    elif is_valid(cfo) and cfo > 0.7:
-        q.append(f"cumulative cash conversion at {cfo}x")
-    elif is_valid(cfo) and cfo < 0.5:
-        q.append(f"cumulative cash conversion at only {cfo}x — structural gap between profit and cash")
-    # NEW: Interest coverage in verdict
-    int_cov = l1.get('int_cov')
-    if is_valid(int_cov):
-        if int_cov < 3:
-            q.append(f"interest coverage at {int_cov}x — dangerously thin")
-        elif int_cov > 15:
-            q.append(f"interest coverage at {int_cov}x — debt is irrelevant")
-    if mby and len(mby) >= 2:
-        margin_str = " -> ".join(f"{m[1]}%" for m in mby)
-        if mt == 'expanding':
-            q.append(f"EBITDA margins expanding {margin_str}")
-        elif mt == 'contracting':
-            q.append(f"EBITDA margins contracting {margin_str}")
-    if q:
-        sents.append(", ".join(q) + ".")
-    if is_valid(sc_v) and is_valid(pc_v):
-        sents.append(f"Revenue compounded at {sc_v}% across {sl} with PAT at {pc_v}% across {pl}.")
-        if l1.get('growth_relaxed'):
-            sents.append("Growth threshold relaxed to 10% — mature compounder with ROE above 25%.")
-    # NEW: Holdings in verdict
-    if holdings and holdings.get('flags'):
-        sents.append("Ownership concern: " + "; ".join(holdings['flags'][:2]).lower() + ".")
-    # NEW: Accrual ratio in verdict
-    ar = acct.get('accrual_ratio')
-    if is_valid(ar) and ar > 10:
-        sents.append(f"Accrual ratio at {ar}% — reported earnings significantly exceed cash earnings relative to asset base.")
-    ccc = acct.get('ccc')
-    if ccc and acct.get('ccc_trend') == 'worsening':
-        sents.append(f"Cash conversion cycle worsened to {ccc['ccc']} days — more capital trapped in working capital.")
-    if is_valid(peg):
-        tn = f" (using revenue growth {val.get('peg_growth')}% as PAT CAGR inflated by turnaround)" if val.get('peg_turnaround') else ""
-        if peg < 0.5:
-            sents.append(f"At PEG {peg}{tn}, the market prices a fraction of earnings growth into the multiple.")
-        elif peg < 1.0:
-            sents.append(f"PEG at {peg}{tn} indicates growth more than justifies the PE.")
-        elif peg < 1.5:
-            sents.append(f"PEG at {peg}{tn} — fairly valued.")
-        elif peg < 2.0:
-            sents.append(f"PEG at {peg}{tn} embeds a valuation premium.")
-        else:
-            sents.append(f"PEG at {peg}{tn} signals overvaluation.")
-    if is_valid(fy) and fy > 5:
-        sents.append(f"FCF yield at {fy}% provides additional margin of safety.")
-    elif is_valid(fy) and fy < 0:
-        sents.append(f"Negative FCF yield at {fy}% — the company consumes cash despite reported profitability.")
-    if mc == 'established moat':
-        sents.append(f"Moat durability at {mp}% ({moat.get('years_above_15')}/{moat.get('total_years')} years) confirms structural competitive advantage.")
-    elif mc == 'emerging moat':
-        sents.append(f"Moat is emerging — ROE crossed 15% in latest two years ({moat.get('years_above_15')}/{moat.get('total_years')} above threshold), trajectory positive but unproven.")
-    elif moat.get('total_years', 0) >= 2:
-        sents.append(f"Moat durability at only {mp}% ({moat.get('years_above_15')}/{moat.get('total_years')} years) raises sustainability questions.")
-    if cyc.get('peak'):
-        sents.append(f"Current ROE at {cyc.get('latest')}% vs median {cyc.get('median')}% indicates cyclical peak — use normalized figure for valuation.")
-    if is_valid(ret) and ret < -30:
-        sents.append(f"The {abs(ret):.0f}% drawdown signals the market is repricing something negative.")
-    if tier in ['HALF', 'WATCH'] and acct.get('flags'):
-        sents.append("Specific flags: " + "; ".join(acct['flags'][:2]).lower() + ".")
-    actions = {'FULL': "Position at 12-15% of portfolio.", 'STANDARD': "Position at 8-10%.",
-               'HALF': "Half position at 4-6% only — add after next results confirm improvement.",
-               'WATCH': "Do not deploy capital. Monitor quarterly."}
-    sents.append(actions.get(tier, "Monitor."))
-    return " ".join(sents)
-
-# ============================================================
-# LAYER DISPLAY (enhanced)
-# ============================================================
-def gen_layers(l1, acct, cyc, val, mom, ret, moat, holdings=None):
-    L = []
-    sl, pl = l1.get('sales_cagr_label', ''), l1.get('pat_cagr_label', '')
-    gf = l1.get('growth_floor', 15)
-    gf_note = f" (relaxed to {gf}%)" if l1.get('growth_relaxed') else ""
-    if l1['pass']:
-        L.append(("Fundamentals", "pass", f"MCap Rs {fmt(l1.get('mcap_cr'), ',.0f')} Cr | ROE {fmt(l1.get('roe'), '.1f')}% | ROCE {fmt(l1.get('roce'), '.1f')}% | D/E {l1.get('de', '-')} | Sales {fmt(l1.get('sales_cagr'), '.1f')}% ({sl}) | PAT {fmt(l1.get('pat_cagr'), '.1f')}% ({pl}){gf_note}"))
-    else:
-        fails = []
-        if not l1['mcap_pass']:
-            fails.append(f"MCap Rs {fmt(l1.get('mcap_cr'), ',.0f')} Cr < Rs 15,000 Cr")
-        if not l1['roe_pass']:
-            fails.append(f"ROE {fmt(l1.get('roe'), '.1f')}% < 15%")
-        if not l1['roce_pass']:
-            fails.append(f"ROCE {fmt(l1.get('roce'), '.1f')}% < 18%")
-        if not l1['de_pass']:
-            fails.append(f"D/E {l1.get('de', '-')} > 0.5")
-        if not l1['growth_pass']:
-            fails.append(f"Growth: Sales {fmt(l1.get('sales_cagr'), '.1f')}% / PAT {fmt(l1.get('pat_cagr'), '.1f')}% < {gf}%")
-        L.append(("Fundamentals", "fail", " | ".join(fails) if fails else "Criteria not met"))
-
-    # NEW: Interest coverage layer
-    int_cov = l1.get('int_cov')
-    if is_valid(int_cov):
-        if int_cov >= 8:
-            L.append(("Interest coverage", "pass", f"{int_cov}x — comfortable"))
-        elif int_cov >= 3:
-            L.append(("Interest coverage", "warn", f"{int_cov}x — adequate"))
-        else:
-            L.append(("Interest coverage", "fail", f"{int_cov}x — danger zone"))
-    else:
-        de = l1.get('de', 0)
-        if is_valid(de) and de < 0.1:
-            L.append(("Interest coverage", "pass", "Minimal debt — N/A"))
-        else:
-            L.append(("Interest coverage", "warn", "Not calculable"))
-
-    s = acct.get('score')
-    nf = acct.get('num_flags', 0)
-    if s is not None:
-        ar_note = f" | Accrual {acct.get('accrual_ratio', '-')}%" if is_valid(acct.get('accrual_ratio')) else ""
-        if s >= 85:
-            L.append(("Forensic accounting", "pass", f"Score {s}/100 | {nf} flags | CFO/PAT {fmt(acct.get('cum_cfo_pat'), '.2f')}x | CFO/EBITDA {fmt(acct.get('cum_cfo_ebitda'), '.2f')}x{ar_note}"))
-        elif s >= 50:
-            L.append(("Forensic accounting", "warn", f"Score {s}/100 | {nf} flags | {' | '.join(acct.get('flags', [])[:2])}"))
-        else:
-            L.append(("Forensic accounting", "fail", f"Score {s}/100 | {nf} flags | {' | '.join(acct.get('flags', [])[:2])}"))
-    ccc = acct.get('ccc')
-    ccc_trend = acct.get('ccc_trend')
-    if ccc:
-        trend_str = f" — {ccc_trend}" if ccc_trend else ""
-        detail = f"{ccc['ccc']}d (R:{ccc['days_recv']} I:{ccc['days_inv']} P:{ccc['days_pay']}){trend_str}"
-        L.append(("Working capital", "warn" if ccc_trend == 'worsening' else "pass", detail))
-    mc = moat.get('consistency', '')
-    mt2 = moat.get('total_years', 0)
-    if mt2 >= 2:
-        st2 = 'pass' if mc == 'established moat' else 'warn' if mc == 'emerging moat' else 'fail'
-        ext = f" (+ {len(moat.get('quarterly_roe', []))} quarterly points)" if moat.get('quarterly_roe') else ""
-        L.append(("Moat durability", st2, f"ROE>15% in {moat['years_above_15']}/{mt2} yrs ({moat['pct']}%) — {mc}{ext}"))
-
-    # NEW: Promoter / Holdings layer (leading indicator)
-    if holdings and is_valid(holdings.get('insider_pct')):
-        ins = holdings['insider_pct']
-        inst = holdings.get('inst_pct')
-        inst_str = f" | Inst {inst}%" if is_valid(inst) else ""
-        if holdings.get('flags'):
-            L.append(("Promoter/Holdings ★", "warn", f"Insider {ins}%{inst_str} — {'; '.join(holdings['flags'][:1])}"))
-        elif ins > 40:
-            L.append(("Promoter/Holdings ★", "pass", f"Insider {ins}%{inst_str} — strong skin in game"))
-        else:
-            L.append(("Promoter/Holdings ★", "pass", f"Insider {ins}%{inst_str}"))
-    else:
-        L.append(("Promoter/Holdings ★", "warn", "Data unavailable"))
-
-    peg = val.get('peg'); pt = val.get('peg_turnaround'); pg = val.get('peg_growth')
-    peg_note = f" (using revenue growth {pg}%)" if pt and is_valid(pg) else ""
-    if is_valid(peg):
-        if peg < 1.0:
-            L.append(("PEG valuation", "pass", f"PEG {peg:.2f}{peg_note}"))
-        elif peg < 1.5:
-            L.append(("PEG valuation", "warn", f"PEG {peg:.2f}{peg_note} — fair"))
-        elif peg < 2.0:
-            L.append(("PEG valuation", "warn", f"PEG {peg:.2f}{peg_note} — expensive"))
-        else:
-            L.append(("PEG valuation", "fail", f"PEG {peg:.2f}{peg_note} — overvalued"))
-    else:
-        L.append(("PEG valuation", "warn", "Not calculable"))
-    fy = val.get('fcf_yield')
-    if is_valid(fy):
-        if fy > 3:
-            L.append(("FCF yield", "pass", f"{fy:.1f}%"))
-        elif fy > 0:
-            L.append(("FCF yield", "warn", f"{fy:.1f}% — thin"))
-        else:
-            L.append(("FCF yield", "fail", f"{fy:.1f}% — negative"))
-    pe = l1.get('pe')
-    if is_valid(pe) and pe > 80:
-        L.append(("Adani filter", "fail", f"PE {pe:.0f} > 80"))
-    if mom.get('available'):
-        lq, pq = mom.get('latest_qoq'), mom.get('prior_qoq')
-        if is_valid(lq) and is_valid(pq):
-            if lq > 0 and pq > 0:
-                L.append(("Earnings momentum", "pass", f"+{lq:.1f}%, +{pq:.1f}% QoQ"))
-            elif lq > 0 or pq > 0:
-                L.append(("Earnings momentum", "warn", f"{lq:+.1f}%, {pq:+.1f}% QoQ"))
-            else:
-                L.append(("Earnings momentum", "fail", f"{lq:+.1f}%, {pq:+.1f}% QoQ — declining"))
-        else:
-            L.append(("Earnings momentum", "warn", "Partial data"))
-    else:
-        L.append(("Earnings momentum", "warn", "Insufficient data"))
-    if cyc.get('peak'):
-        L.append(("Cyclical ROE", "warn", f"PEAK: {cyc['latest']}% vs norm {cyc['median']}%"))
-    elif cyc.get('roe_by_year'):
-        L.append(("Cyclical ROE", "pass", f"Not at peak: {cyc.get('latest', '-')}% vs norm {cyc.get('median', '-')}%"))
-    if is_valid(ret):
-        if ret > 0:
-            L.append(("1Y price", "pass", f"{ret:+.1f}%"))
-        elif ret > -20:
-            L.append(("1Y price", "warn", f"{ret:+.1f}%"))
-        else:
-            L.append(("1Y price", "fail", f"{ret:+.1f}%"))
-    else:
-        L.append(("1Y price", "warn", "Unavailable"))
-    return L
-
-# ============================================================
-# SCORECARD HTML (enhanced)
-# ============================================================
-def gen_scorecard(name, ticker, sector, price, tier, size, l1, acct, val, ret, moat, layers, verdict, holdings=None):
-    navy = NAVY; now_str = datetime.now().strftime("%d %b %Y, %I:%M %p")
-    pr = f"Rs {price:,.2f}" if is_valid(price) else "—"
-    sc = acct.get('score', '—')
-    tier_bg = {'FULL': '#059669', 'STANDARD': '#2563EB', 'HALF': '#D97706', 'WATCH': '#DC2626'}.get(tier, '#888')
-    sl, pl = l1.get('sales_cagr_label', ''), l1.get('pat_cagr_label', '')
-    int_cov = l1.get('int_cov')
-    int_cov_str = f"{int_cov}x" if is_valid(int_cov) else "N/A"
-    ins_pct = holdings.get('insider_pct', None) if holdings else None
-    ins_str = f"{ins_pct}%" if is_valid(ins_pct) else "N/A"
-    met = [('PE', fmt(l1['pe'], '.1f')), ('PEG', fmt(val.get('peg'), '.2f')), ('ROE', fmt(l1['roe'], '.1f', '%')),
-           ('ROCE', fmt(l1['roce'], '.1f', '%')), ('D/E', fmt(l1['de'], '.2f')), ('Int Cov', int_cov_str),
-           ('FCF Yield', fmt(val.get('fcf_yield'), '.1f', '%')), ('Insider', ins_str), ('1Y Ret', fmt(ret, '+.1f', '%'))]
-    met_html = "".join(f'<td style="padding:10px 4px;text-align:center;border-right:1px solid #ddd;"><div style="color:#888;font-size:8px;margin-bottom:3px;">{lb}</div><div style="font-family:Courier New,monospace;font-weight:bold;font-size:13px;color:{navy};">{vl}</div></td>' for lb, vl in met)
-    layer_html = ""
-    for ln, st2, dt in layers:
-        ic = '&#10003;' if st2 == 'pass' else '&#10007;' if st2 == 'fail' else '&#9888;'
-        cl = '#059669' if st2 == 'pass' else '#DC2626' if st2 == 'fail' else '#D97706'
-        lead_tag = ' <span style="background:#DBEAFE;color:#1D4ED8;padding:1px 4px;border-radius:2px;font-size:7px;font-weight:bold;">LEAD</span>' if '★' in ln else ''
-        ln_clean = ln.replace(' ★', '')
-        layer_html += f'<tr><td style="padding:4px 8px;color:{cl};font-size:12px;width:18px;">{ic}</td><td style="padding:4px 8px;font-size:10px;font-weight:bold;white-space:nowrap;">{ln_clean}{lead_tag}</td><td style="padding:4px 8px;font-size:9px;color:#555;">{dt}</td></tr>'
-    growth_items = [(f'Sales CAGR ({sl})', fmt(l1.get('sales_cagr'), '.1f', '%')),
-                    (f'PAT CAGR ({pl})', fmt(l1.get('pat_cagr'), '.1f', '%')),
-                    ('Cum CFO/PAT', fmt(acct.get('cum_cfo_pat'), '.2f', 'x')),
-                    ('Cum CFO/EBITDA', fmt(acct.get('cum_cfo_ebitda'), '.2f', 'x')),
-                    ('Accrual ratio', fmt(acct.get('accrual_ratio'), '.1f', '%')),
-                    (f'Moat ({moat.get("total_years", 0)} yrs)', f'{moat.get("pct", 0)}% — {moat.get("consistency", "—")}')]
-    net_debt = l1.get('net_debt_cr')
-    if is_valid(net_debt):
-        growth_items.append(('Net debt', f"Rs {net_debt:,.0f} Cr" + (" (net cash)" if net_debt < 0 else "")))
-    mby = acct.get('margins_by_year', [])
-    if mby and len(mby) >= 2:
-        margin_str = " &rarr; ".join(f"{m[1]}%" for m in mby)
-        arr = '&#8593;' if acct.get('margin_trend') == 'expanding' else '&#8595;' if acct.get('margin_trend') == 'contracting' else '&rarr;'
-        growth_items.append(('EBITDA margins', f'{margin_str} {arr}'))
-    if val.get('peg_turnaround'):
-        growth_items.append(('PEG note', f'Using revenue growth {val.get("peg_growth")}%'))
-    ccc = acct.get('ccc')
-    if ccc:
-        growth_items.append(('Cash cycle', f"{ccc['ccc']}d (R:{ccc['days_recv']} I:{ccc['days_inv']} P:{ccc['days_pay']})"))
-    growth_html = "".join(f'<tr><td style="padding:4px 8px;font-size:9px;color:#888;">{lb}</td><td style="padding:4px 8px;font-size:11px;font-family:Courier New,monospace;text-align:right;color:{navy};">{vl}</td></tr>' for lb, vl in growth_items)
-    return f'''<!DOCTYPE html><html><head><meta charset="utf-8"><title>{name} Scorecard</title>
-<style>@page{{size:A4;margin:10mm;}}*{{margin:0;padding:0;box-sizing:border-box;}}body{{font-family:Segoe UI,Arial,sans-serif;color:#1a1a1a;font-size:11px;}}table{{border-collapse:collapse;width:100%;}}</style></head><body>
-<div style="background:{navy};color:white;padding:12px 20px;display:flex;justify-content:space-between;align-items:center;">
-<div><div style="font-size:12px;font-weight:bold;letter-spacing:0.5px;">HIGH COMPOUNDER FRAMEWORK v2</div><div style="font-size:9px;margin-top:3px;font-weight:bold;">Vinayak Nagral  |  {datetime.now().strftime("%d %b %Y")}</div></div>
-<div style="text-align:right;font-size:8px;">Quantitative screening<br>Not investment advice</div></div>
-<div style="padding:14px 20px;border-bottom:3px solid {navy};display:flex;justify-content:space-between;align-items:flex-end;">
-<div><div style="font-size:22px;font-weight:bold;color:{navy};">{name}</div><div style="font-size:10px;color:#888;margin-top:3px;">{ticker}  |  {sector}  |  {pr}  |  CMP as of {now_str}</div></div>
-<div style="text-align:right;"><div style="background:{tier_bg};color:white;padding:5px 16px;border-radius:14px;font-size:12px;font-weight:bold;display:inline-block;">{tier}  {size}</div>
-<div style="font-size:9px;color:#888;margin-top:4px;">Score {sc}/100</div></div></div>
-<table style="border-bottom:1px solid #ddd;"><tr>{met_html}</tr></table>
-<div style="display:flex;border-bottom:1px solid #ddd;">
-<div style="flex:1;padding:12px 20px;border-right:1px solid #ddd;"><div style="font-size:10px;font-weight:bold;color:{navy};margin-bottom:8px;">LAYER RESULTS</div><table>{layer_html}</table></div>
-<div style="width:240px;padding:12px 20px;"><div style="font-size:10px;font-weight:bold;color:{navy};margin-bottom:8px;">GROWTH &amp; CASH</div><table>{growth_html}</table></div></div>
-<div style="padding:12px 20px;border-bottom:1px solid #ddd;"><div style="font-size:10px;font-weight:bold;color:{navy};margin-bottom:6px;">INVESTMENT VERDICT</div>
-<div style="font-size:10px;line-height:1.7;">{verdict}</div></div>
-<div style="padding:8px 20px;font-size:7px;color:#aaa;">Quantitative framework output. Not a research recommendation. Data via Yahoo Finance. For personal use only.</div>
-</body></html>'''
-
-# ============================================================
-# FULL ANALYSIS
-# ============================================================
-def full_analysis(ticker):
-    sd = fetch(ticker)
-    if not sd:
-        return None
-    info = sd['info']; fin = sd['fin']; bs = sd['bs']; cf = sd['cf']
-    qfin = sd['qfin']
-    bank = is_banking(info, ticker)
-    try:
-        l1 = run_layer1(sd, ticker)
-    except Exception:
-        return None
-    try:
-        multi = build_multi(fin, bs, cf)
-    except Exception:
-        multi = None
-    try:
-        acct = run_forensic(multi) if multi else dict(DEFAULT_ACCT)
-    except Exception:
-        acct = dict(DEFAULT_ACCT)
-    try:
-        cyc = run_cyclical(multi) if multi else dict(DEFAULT_CYC)
-    except Exception:
-        cyc = dict(DEFAULT_CYC)
-    try:
-        moat = run_moat(multi) if multi else dict(DEFAULT_MOAT)
-    except Exception:
-        moat = dict(DEFAULT_MOAT)
-    try:
-        mom = run_momentum(qfin)
-    except Exception:
-        mom = dict(DEFAULT_MOM)
-    try:
-        ret = ext_1y_ret(sd)
-    except Exception:
-        ret = None
-    try:
-        mcap = ext_mcap(sd, l1['price'])
-    except Exception:
-        mcap = None
-    try:
-        val = run_valuation(l1['pe'], l1['pat_cagr'], l1.get('sales_cagr'), l1['price'], mcap, sd)
-    except Exception:
-        val = {'peg': None, 'peg_growth': None, 'peg_turnaround': False, 'fcf_yield': None}
-    # NEW: Holdings analysis
-    try:
-        holdings = run_holdings_analysis(sd.get('holdings', dict(DEFAULT_HOLDINGS)))
-    except Exception:
-        holdings = dict(DEFAULT_HOLDINGS)
-    try:
-        tier, size = get_tier(
-            acct.get('score'), acct.get('num_flags', 0), cyc.get('peak', False),
-            val.get('peg'), ret, moat.get('consistency', ''),
-            holdings, l1.get('int_cov'))
-        if not l1['pass'] and tier in ['FULL', 'STANDARD']:
-            tier, size = 'HALF', '4-6%'
-    except Exception:
-        tier, size = 'WATCH', '0%'
-    try:
-        layers = gen_layers(l1, acct, cyc, val, mom, ret, moat, holdings)
-    except Exception:
-        layers = [("Error", "fail", "Layer display failed")]
-    try:
-        verdict = gen_verdict(l1['name'], tier, l1, acct, cyc, val, ret, moat, bank, holdings)
-    except Exception:
-        verdict = f"{l1.get('name', ticker)} — analysis completed with errors. Review debug tab."
-    try:
-        html = gen_scorecard(l1['name'], ticker, l1['sector'], l1['price'], tier, size, l1, acct, val, ret, moat, layers, verdict, holdings)
-    except Exception:
-        html = None
-    return {'sd': sd, 'l1': l1, 'acct': acct, 'cyc': cyc, 'moat': moat, 'mom': mom, 'ret': ret, 'val': val,
-            'tier': tier, 'size': size, 'layers': layers, 'verdict': verdict, 'html': html,
-            'bank': bank, 'info': info, 'fin': fin, 'bs': bs, 'cf': cf, 'qfin': qfin,
-            'holdings': holdings}
-
-# ============================================================
-# BATCH SCREENER (enhanced with sector cap)
-# ============================================================
-def analyse_with_funnel(ticker):
-    sd = fetch(ticker)
-    if not sd:
-        return None, 'fetch_fail'
-    if is_banking(sd['info']):
-        return None, 'banking'
-    try:
-        l1 = run_layer1(sd, ticker)
-    except Exception:
-        return None, 'fetch_fail'
-    if not l1['mcap_pass']:
-        return None, 'mcap'
-    if not l1['de_pass']:
-        return None, 'debt'
-    if not l1['roe_pass']:
-        return None, 'roe'
-    if not l1['roce_pass']:
-        return None, 'roce'
-    if not l1['growth_pass']:
-        return None, 'growth'
-    try:
-        multi = build_multi(sd['fin'], sd['bs'], sd['cf'])
-    except Exception:
-        return None, 'data'
-    if not multi:
-        return None, 'data'
-    try:
-        acct = run_forensic(multi)
-        cyc = run_cyclical(multi)
-        moat = run_moat(multi)
-        val = run_valuation(l1['pe'], l1['pat_cagr'], l1.get('sales_cagr'), l1['price'], ext_mcap(sd, l1['price']), sd)
-        ret = ext_1y_ret(sd)
-        holdings = run_holdings_analysis(sd.get('holdings', dict(DEFAULT_HOLDINGS)))
-        tier, size = get_tier(
-            acct['score'], acct['num_flags'], cyc.get('peak', False),
-            val.get('peg'), ret, moat.get('consistency', ''),
-            holdings, l1.get('int_cov'))
-    except Exception:
-        return None, 'data'
-    ccc_obj = acct.get('ccc')
-    return {'ticker': ticker.replace('.NS', ''), 'name': l1['name'], 'sector': l1['sector'],
-            'price': l1['price'], 'pe': l1['pe'], 'peg': val.get('peg'), 'roe': l1['roe'], 'roce': l1['roce'],
-            'score': acct['score'], 'nf': acct['num_flags'], 'cum_cfo': acct.get('cum_cfo_pat'),
-            'peak': cyc.get('peak', False), 'ret': ret, 'tier': tier, 'size': size,
-            'sc': l1.get('sales_cagr'), 'pc': l1.get('pat_cagr'), 'moat': moat.get('pct', 0),
-            'fcf_yield': val.get('fcf_yield'), 'ccc': ccc_obj.get('ccc') if ccc_obj else None,
-            'int_cov': l1.get('int_cov'), 'net_debt_cr': l1.get('net_debt_cr'),
-            'insider_pct': holdings.get('insider_pct'),
-            'accrual_ratio': acct.get('accrual_ratio')}, 'pass'
-
-def apply_sector_cap(results, max_sector_pct=30):
-    """Cap any sector at max_sector_pct of total picks. Demote excess to WATCH."""
-    if not results:
-        return results
-    df = pd.DataFrame(results)
-    tier_alloc = {'FULL': 13.5, 'STANDARD': 9, 'HALF': 5, 'WATCH': 0}
-    df['alloc'] = df['tier'].map(tier_alloc).fillna(0)
-    total_alloc = df['alloc'].sum()
-    if total_alloc == 0:
-        return results
-
-    sector_alloc = df.groupby('sector')['alloc'].sum()
-    for sector in sector_alloc.index:
-        sector_pct = sector_alloc[sector] / total_alloc * 100
-        if sector_pct > max_sector_pct:
-            # Demote weakest stocks in this sector
-            sector_mask = df['sector'] == sector
-            sector_df = df[sector_mask].sort_values('rank', ascending=True)  # weakest first
-            while True:
-                current_alloc = df.loc[df['sector'] == sector, 'alloc'].sum()
-                new_total = df['alloc'].sum()
-                if new_total == 0 or current_alloc / new_total * 100 <= max_sector_pct:
-                    break
-                # Demote the weakest in this sector that isn't already WATCH
-                demote_candidates = df[(df['sector'] == sector) & (df['tier'] != 'WATCH')]
-                if demote_candidates.empty:
-                    break
-                worst_idx = demote_candidates['rank'].idxmin()
-                if df.loc[worst_idx, 'tier'] == 'FULL':
-                    df.loc[worst_idx, 'tier'] = 'STANDARD'
-                    df.loc[worst_idx, 'size'] = '8-10%'
-                    df.loc[worst_idx, 'alloc'] = 9
-                elif df.loc[worst_idx, 'tier'] == 'STANDARD':
-                    df.loc[worst_idx, 'tier'] = 'HALF'
-                    df.loc[worst_idx, 'size'] = '4-6%'
-                    df.loc[worst_idx, 'alloc'] = 5
-                else:
-                    df.loc[worst_idx, 'tier'] = 'WATCH'
-                    df.loc[worst_idx, 'size'] = '0%'
-                    df.loc[worst_idx, 'alloc'] = 0
-    return df.drop(columns=['alloc']).to_dict('records')
-
-# ============================================================
-# NIFTY TICKER LIST (FIXED — comprehensive fallback)
-# ============================================================
-@st.cache_data(ttl=86400, show_spinner=False)
-def get_nifty_tickers(max_stocks):
-    from urllib.request import Request, urlopen
-    import io as _io
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
+    return {
+        "peg": round(peg, 2) if is_valid(peg) else None,
+        "peg_growth": round(growth_used, 1) if is_valid(growth_used) else None,
+        "peg_turnaround": turnaround_adjustment,
+        "fcf_yield": round(fcf_yield, 2) if is_valid(fcf_yield) else None,
+        "pe_extreme": is_valid(pe) and pe > 80,
     }
-    # Try Nifty 500 first, then 200, then 100
+
+
+# =============================================================================
+# ALLOCATION AND COMPOSITE RANKING
+# =============================================================================
+def get_tier(
+    forensic_score: float | None,
+    num_flags: int,
+    cyclical_peak: bool,
+    peg: float | None,
+    one_year_return: float | None,
+    moat_consistency: str,
+    holdings: dict,
+    interest_coverage: float | None,
+    debt_to_equity: float | None,
+    fundamental_pass: bool,
+    forensic_complete: bool
+) -> tuple[str, str, str]:
+    """Deterministic tiering. Fundamental failures remain capped at HALF in single-stock review."""
+
+    if forensic_score is None:
+        return (
+            "WATCH",
+            TIER_SIZE["WATCH"],
+            "Insufficient aligned financial data for a reliable forensic score"
+        )
+
+    if forensic_score < 50:
+        return "WATCH", TIER_SIZE["WATCH"], "Forensic score below 50"
+
+    if is_valid(peg) and peg > 5:
+        return "WATCH", TIER_SIZE["WATCH"], "PEG above 5.0"
+
+    if not is_valid(peg):
+        base = "HALF"
+    elif peg > 1.5:
+        base = "HALF"
+
+    elif (
+        forensic_score >= 85
+        and num_flags == 0
+        and not cyclical_peak
+        and moat_consistency in (
+            "established moat proxy",
+            "emerging moat proxy"
+        )
+        and peg <= 1.0
+        and forensic_complete
+    ):
+        base = "FULL"
+
+    elif forensic_score >= 70 and num_flags <= 1 and peg <= 1.5:
+        base = "STANDARD"
+
+    else:
+        base = "HALF"
+
+    reasons = [f"Base assessment: {base}"]
+
+    rank = {
+        "WATCH": 0,
+        "HALF": 1,
+        "STANDARD": 2,
+        "FULL": 3
+    }
+
+    def cap_to(maximum: str, reason: str):
+        nonlocal base
+
+        if rank[base] > rank[maximum]:
+            base = maximum
+            reasons.append(reason)
+
+    if not fundamental_pass:
+        cap_to("HALF", "One or more fundamental hard filters failed")
+
+    if is_valid(interest_coverage) and interest_coverage < 3:
+        cap_to("HALF", "Interest coverage below 3x")
+
+    elif (
+        not is_valid(interest_coverage)
+        and is_valid(debt_to_equity)
+        and debt_to_equity >= 0.1
+    ):
+        cap_to(
+            "STANDARD",
+            "Interest coverage unavailable despite material debt"
+        )
+
+    if is_valid(peg) and peg > 3:
+        cap_to("HALF", "PEG above 3.0")
+
+    if not is_valid(peg):
+        cap_to("HALF", "PEG unavailable")
+
+    if not forensic_complete:
+        cap_to(
+            "STANDARD",
+            "Limited multi-year forensic data; FULL tier unavailable"
+        )
+
+    if holdings.get("score_adj", 0) <= -10:
+        cap_to("STANDARD", "Verified promoter holding below 20%")
+
+    if (
+        base == "FULL"
+        and is_valid(one_year_return)
+        and one_year_return < -30
+    ):
+        cap_to(
+            "HALF",
+            "One-year share-price return below -30%; investment thesis requires review"
+        )
+
+    return base, TIER_SIZE[base], "; ".join(reasons)
+
+
+def score_peg(peg: float | None) -> float:
+    if not is_valid(peg) or peg <= 0:
+        return 0.0
+
+    if peg <= 0.5:
+        return 100.0
+
+    if peg <= 1.0:
+        return 100 - (peg - 0.5) * 40
+
+    if peg <= 1.5:
+        return 80 - (peg - 1.0) * 40
+
+    if peg <= 2.0:
+        return 60 - (peg - 1.5) * 40
+
+    if peg <= 3.0:
+        return 40 - (peg - 2.0) * 30
+
+    return max(0.0, 10 - (peg - 3.0) * 5)
+
+
+def score_cfo_quality(cfo_pat: float | None) -> float:
+    if not is_valid(cfo_pat):
+        return 0.0
+
+    if cfo_pat >= 1.2:
+        return 100.0
+
+    if cfo_pat >= 1.0:
+        return 90.0
+
+    if cfo_pat >= 0.7:
+        return 65.0 + (cfo_pat - 0.7) / 0.3 * 25.0
+
+    if cfo_pat >= 0.5:
+        return 35.0 + (cfo_pat - 0.5) / 0.2 * 30.0
+
+    return max(0.0, cfo_pat / 0.5 * 35.0)
+
+
+def score_roe(roe: float | None) -> float:
+    if not is_valid(roe):
+        return 0.0
+
+    # 5% ROE -> 0; 35% or higher -> 100.
+    return float(np.clip((roe - 5) / 30 * 100, 0, 100))
+
+
+def composite_score(
+    l1: dict,
+    acct: dict,
+    moat: dict,
+    momentum: dict,
+    val: dict
+) -> float:
+    components = {
+        "peg": score_peg(val.get("peg")),
+        "forensic": float(acct.get("score") or 0),
+        "momentum": float(momentum.get("score", 40)),
+        "cfo": score_cfo_quality(acct.get("cum_cfo_pat")),
+        "moat": float(moat.get("pct", 0)),
+        "roe": score_roe(l1.get("roe")),
+    }
+
+    weights = {
+        "peg": .25,
+        "forensic": .20,
+        "momentum": .15,
+        "cfo": .15,
+        "moat": .15,
+        "roe": .10
+    }
+
+    return round(
+        sum(components[k] * weights[k] for k in weights),
+        2
+    )
+
+
+# =============================================================================
+# OWNERSHIP / UNIVERSE FILES
+# =============================================================================
+def get_universe_tickers(
+    max_stocks: int,
+    uploaded_csv=None
+) -> tuple[list[str], str]:
+
+    if uploaded_csv is not None:
+        try:
+            frame = pd.read_csv(uploaded_csv)
+
+            symbol_col = next(
+                (
+                    c for c in frame.columns
+                    if str(c).strip().lower() in ("symbol", "ticker")
+                ),
+                None
+            )
+
+            if symbol_col is None:
+                raise ValueError(
+                    "Uploaded CSV must contain a Symbol or Ticker column"
+                )
+
+            symbols = [
+                clean_ticker(x)
+                for x in frame[symbol_col].dropna().tolist()
+            ]
+
+            symbols = list(dict.fromkeys(x for x in symbols if x))
+
+            if not symbols:
+                raise ValueError("No valid symbols found")
+
+            if max_stocks < len(symbols):
+                selected = pd.Series(symbols).sample(
+                    n=max_stocks,
+                    random_state=42
+                ).tolist()
+
+                return (
+                    selected,
+                    f"User-uploaded constituent CSV · deterministic sample of {max_stocks}/{len(frame)}"
+                )
+
+            return symbols[:max_stocks], "User-uploaded constituent CSV"
+
+        except Exception as exc:
+            raise ValueError(
+                f"Could not parse universe CSV: {exc}"
+            ) from exc
+
     urls = [
+        "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv",
         "https://archives.nseindia.com/content/indices/ind_nifty500list.csv",
-        "https://www1.nseindia.com/content/indices/ind_nifty500list.csv",
-        "https://archives.nseindia.com/content/indices/ind_nifty200list.csv",
-        "https://archives.nseindia.com/content/indices/ind_nifty100list.csv",
     ]
+
+    errors = []
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 Chrome/120 Safari/537.36"
+        ),
+        "Accept": "text/csv,application/csv,*/*;q=0.8",
+        "Referer": "https://www.niftyindices.com/indices/equity/broad-based-indices",
+    }
+
     for url in urls:
         try:
-            req = Request(url, headers=headers)
-            resp = urlopen(req, timeout=15)
-            df = pd.read_csv(_io.BytesIO(resp.read()))
-            if 'Symbol' in df.columns:
-                tickers = [s.strip() + ".NS" for s in df['Symbol'].tolist()]
-                if len(tickers) >= max_stocks * 0.8:  # BUG FIX: only accept if we got enough
-                    return tickers[:max_stocks], url.split('/')[-1].replace('.csv', '')
-        except Exception:
-            continue
+            request = Request(url, headers=headers)
 
-    # Comprehensive Nifty 500 hardcoded fallback (Sep 2026)
-    fallback = [
-        "360ONE","3MINDIA","ABB","ACC","ACMESOLAR","AIAENG","APLAPOLLO","AUBANK","AWL",
-        "AADHARHFC","AARTIIND","AAVAS","ABBOTINDIA","ACE","ADANIENSOL","ADANIENT",
-        "ADANIGREEN","ADANIPORTS","ADANIPOWER","ATGL","ABCAPITAL","ABFRL","ABSLAMC",
-        "AEGISLOG","AFCONS","AFFLE","AJANTPHARM","ALKEM","AMBER","AMBUJACEM",
-        "ANANDRATHI","ANANTRAJ","ANGELONE","APARINDS","APOLLOHOSP","APOLLOTYRE","APTUS",
-        "ASAHIINDIA","ASHOKLEY","ASIANPAINT","ASTERDM","ASTRAL","ATUL","AUROPHARMA",
-        "DMART","AXISBANK","BEML","BLS","BSE","BAJAJ-AUTO","BAJFINANCE","BAJAJFINSV",
-        "BAJAJHLDNG","BAJAJHFL","BALKRISIND","BALRAMCHIN","BANDHANBNK","BANKBARODA",
-        "BANKINDIA","MAHABANK","BATAINDIA","BAYERCROP","BERGEPAINT","BDL","BEL",
-        "BHARATFORG","BHEL","BPCL","BHARTIARTL","BHARTIHEXA","BIKAJI","BIOCON","BSOFT",
-        "BLUEDART","BLUEJET","BLUESTARCO","BOSCHLTD","BRIGADE","BRITANNIA","MAPMYINDIA",
-        "CCL","CESC","CGPOWER","CIEINDIA","CRISIL","CANFINHOME","CANBK","CAPLIPOINT",
-        "CGCL","CARBORUNIV","CASTROLIND","CEATLTD","CENTRALBK","CDSL","CHALET",
-        "CHAMBLFERT","CHENNPETRO","CHOLAHLDNG","CHOLAFIN","CIPLA","CUB","CLEAN",
-        "COALINDIA","COCHINSHIP","COFORGE","COLPAL","CAMS","CONCORDBIO","CONCOR",
-        "COROMANDEL","CRAFTSMAN","CREDITACC","CROMPTON","CUMMINSIND","CYIENT","DCMSHRIRAM",
-        "DLF","DOMS","DABUR","DALBHARAT","DATAPATTNS","DEEPAKFERT","DEEPAKNTR","DELHIVERY",
-        "DEVYANI","DIVISLAB","DIXON","LALPATHLAB","DRREDDY","EIDPARRY","EIHOTEL",
-        "EICHERMOT","ELECON","ELGIEQUIP","EMAMILTD","EMCURE","ENDURANCE","ENGINERSIN",
-        "ERIS","ESCORTS","ETERNAL","EXIDEIND","NYKAA","FEDERALBNK","FACT","FINCABLES",
-        "FSL","FIVESTAR","FORCEMOT","FORTIS","GAIL","GMRAIRPORT","GABRIEL","GRSE",
-        "GICRE","GILLETTE","GLAND","GLAXO","GLENMARK","MEDANTA","GODIGIT","GPIL",
-        "GODFRYPHLP","GODREJCP","GODREJIND","GODREJPROP","GRANULES","GRAPHITE","GRASIM",
-        "GRAVITA","GESHIP","FLUOROCHEM","GMDCLTD","HEG","HCLTECH","HDFCAMC","HDFCBANK",
-        "HDFCLIFE","HFCL","HAVELLS","HEROMOTOCO","HEXT","HINDALCO","HAL","HINDCOPPER",
-        "HINDPETRO","HINDUNILVR","HINDZINC","POWERINDIA","HOMEFIRST","HONASA","HONAUT",
-        "HUDCO","HYUNDAI","ICICIBANK","ICICIGI","ICICIPRULI","IDBI","IDFCFIRSTB",
-        "IFCI","IIFL","IRB","IRCON","ITC","ITI","INDIAMART","INDIANB","IEX","INDHOTEL",
-        "IOC","IOB","IRCTC","IRFC","IREDA","IGL","INDUSTOWER","INDUSINDBK","NAUKRI",
-        "INFY","INOXWIND","INTELLECT","INDIGO","IPCALAB","JKCEMENT","JBMA","JKTYRE",
-        "JMFINANCIL","JSWENERGY","JSWINFRA","JSWSTEEL","JINDALSAW","JSL","JINDALSTEL",
-        "JIOFIN","JUBLFOOD","JUBLINGREA","JUBLPHARMA","JWL","JYOTICNC","KPRMILL","KEI",
-        "KPITTECH","KAJARIACER","KPIL","KALYANKJIL","KARURVYSYA","KAYNES","KEC",
-        "KFINTECH","KIRLOSENG","KOTAKBANK","KIMS","LTF","LTTS","LICHSGFIN","LTFOODS",
-        "LT","LATENTVIEW","LAURUSLABS","LEMONTREE","LICI","LINDEINDIA","LLOYDSME",
-        "LODHA","LUPIN","MMTC","MRF","MGL","MANAPPURAM","MRPL","MANKIND","MARICO",
-        "MARUTI","MFSL","MAXHEALTH","MAZDOCK","MINDACORP","MSUMI","MOTILALOFS","MPHASIS",
-        "MCX","MUTHOOTFIN","NATCOPHARM","NBCC","NCC","NHPC","NLCINDIA","NMDC","NTPC",
-        "NH","NATIONALUM","NAVA","NAVINFLUOR","NESTLEIND","NETWEB","NEULANDLAB","NEWGEN",
-        "NUVAMA","NUVOCO","OBEROIRLTY","ONGC","OIL","OLAELEC","OLECTRA","PAYTM",
-        "OFSS","POLICYBZR","PCBL","PGEL","PIIND","PNBHOUSING","PVRINOX","PAGEIND",
-        "PATANJALI","PERSISTENT","PETRONET","PFIZER","PHOENIXLTD","PIDILITIND","POLYCAB",
-        "POONAWALLA","PFC","POWERGRID","PREMIERENE","PRESTIGE","PNB","RRKABEL","RBLBANK",
-        "RECLTD","RHIM","RITES","RADICO","RVNL","RAILTEL","RAINBOW","RKFORGE",
-        "REDINGTON","RELIANCE","RPOWER","SBFC","SBICARD","SBILIFE","SJVN","SRF",
-        "SAGILITY","MOTHERSON","SAPPHIRE","SARDAEN","SAREGAMA","SCHAEFFLER","SCHNEIDER",
-        "SCI","SHREECEM","SHRIRAMFIN","SHYAMMETL","SIEMENS","SOBHA","SOLARINDS",
-        "SONACOMS","SONATSOFTW","STARHEALTH","SBIN","SAIL","SUMICHEM","SUNPHARMA",
-        "SUNTV","SUNDARMFIN","SUPREMEIND","SUZLON","SYNGENE","SYRMA","TBOTEK",
-        "TVSMOTOR","TATACHEM","TATACOMM","TCS","TATACONSUM","TATAELXSI","TATAPOWER",
-        "TATASTEEL","TATATECH","TECHM","TECHNOE","TEGA","TEJASNET","RAMCOCEM","THERMAX",
-        "TIMKEN","TITAGARH","TITAN","TORNTPHARM","TORNTPOWER","TRENT","TRIDENT",
-        "TRITURBINE","TIINDIA","UCOBANK","UNOMINDA","UPL","UTIAMC","ULTRACEMCO",
-        "UNIONBANK","UBL","UNITDSPR","USHAMART","VTL","VBL","VEDL","VIJAYA","VMM",
-        "IDEA","VOLTAS","WAAREEENER","WELCORP","WELSPUNLIV","WHIRLPOOL","WIPRO",
-        "WOCKPHARMA","YESBANK","ZFCVINDIA","ZEEL","ZENTEC","ZENSARTECH","ZYDUSLIFE",
-        "ZYDUSWELL","ECLERX","AARTIPHARM","AARTI","ABCAP","ABSLAMC","ADANITOTAL",
-        "ALKYLAMINE","ALLCARGO","ALOKINDS","ANURAS","ASTRAZEN","AVANTIFEED","BANARISUG",
-        "BASF","BBTC","BIRLACORPN","CANFINHOME","CARERATING","CENTURYPLY","CENTURYTEX",
-        "CHEMPLASTS","CHOICEIN","CIGNITITEC","COCHINSHIP","DEEPAKFERT","DELTACORP",
-        "DHANI","EIHOTEL","ELECTCAST","ESTER","FDC","FINPIPE","GARFIBRES",
-        "GENUSPOWER","GHCL","GNFC","GOCOLORS","GOODYEAR","GRINDWELL","GSFC",
-        "GSPL","GUJALKALI","GULFOILLUB","HAPPSTMNDS","HATSUN","HGS","HIKAL",
-        "HINDWAREAP","IBULHSGFIN","ICRA","IDFC","IGPL","IIFLWAM","INDIACEM",
-        "JAMNAAUTO","JCHAC","JUBLINDS","JUSTDIAL","KALYANKJIL","KANSAINER",
-        "KSB","LAXMIMACH","LUXIND","MAHINDCIE","MANINFRA","MASTEK","MAXHEALTH",
-        "METROPOLIS","MIDHANI","MHRIL","MINDTREE","MMFL","MOREPENLAB","MSTCLTD",
-        "MUTHOOTCAP","NIACL","NOCIL","OLECTRA","PGHH","PRISMJOYCE","PRINCEPIPE",
-        "QUESS","RATNAMANI","RELAXO","RENUKA","ROSSARI","ROUTE","SAFARI",
-        "SANOFI","SHARDACROP","SHILPAMED","SIS","SKFINDIA","SOLARA","SPARC",
-        "STLTECH","SUDARSCHEM","SUNDRMFAST","SWANENERGY","TASTYBITE","TEAMLEASE",
-        "THYROCARE","TIMETECH","TVSSRICHAK","VAIBHAVGBL","VGUARD","VINATIORGA",
-        "VIPIND","VSTIND","WABAG","WESTLIFE","ZENSARTECH",
+            with urlopen(request, timeout=15) as response:
+                payload = response.read()
+
+            frame = pd.read_csv(io.BytesIO(payload))
+
+            symbol_col = next(
+                (
+                    c for c in frame.columns
+                    if str(c).strip().lower() == "symbol"
+                ),
+                None
+            )
+
+            if symbol_col and len(frame) >= 450:
+                symbols = list(
+                    dict.fromkeys(
+                        clean_ticker(x)
+                        for x in frame[symbol_col].dropna().tolist()
+                    )
+                )
+
+                if max_stocks < len(symbols):
+                    symbols = pd.Series(symbols).sample(
+                        n=max_stocks,
+                        random_state=42
+                    ).tolist()
+
+                    source_label = (
+                        f"Live Nifty 500 CSV · deterministic sample "
+                        f"of {max_stocks}/{len(frame)}"
+                    )
+
+                    return symbols, source_label
+
+                return symbols[:max_stocks], "Live Nifty 500 constituent CSV"
+
+            errors.append(
+                f"{url}: unexpected CSV schema or fewer than 450 rows"
+            )
+
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}")
+
+    raise RuntimeError(
+        "Live Nifty 500 download failed. Upload the latest official "
+        "Nifty 500 CSV. " + "; ".join(errors)
+    )
+
+
+# =============================================================================
+# ANALYSIS PIPELINE
+# =============================================================================
+def analyse_stock(
+    ticker: str,
+    ownership_overrides: dict | None = None
+) -> dict | None:
+
+    ticker = clean_ticker(ticker)
+    data = fetch_stock(ticker)
+
+    if not data:
+        return None
+
+    if is_financial_company(data["info"], ticker):
+        return {
+            "ticker": ticker,
+            "excluded": True,
+            "excluded_reason": (
+                "Financial company; use a separate financial-sector framework"
+            )
+        }
+
+    multi, alignment_warnings = build_multi(
+        data.get("fin"),
+        data.get("bs"),
+        data.get("cf")
+    )
+
+    data["debug"]["warnings"].extend(alignment_warnings)
+
+    l1 = run_layer1(data, ticker, multi)
+    acct = run_forensic(multi)
+    moat = run_moat(multi)
+    cyc = run_cyclical(multi)
+    momentum = run_momentum(data.get("qfin"))
+    one_year_return = extract_one_year_return(data)
+
+    val = run_valuation(
+        l1.get("pe"),
+        l1.get("eps_growth"),
+        l1.get("sales_cagr"),
+        data,
+        l1.get("mcap")
+    )
+
+    override = (ownership_overrides or {}).get(ticker, {})
+
+    holdings = run_holdings_analysis(
+        data.get("yahoo_holdings", {}),
+        override
+    )
+
+    tier, size, tier_reason = get_tier(
+        acct.get("score"),
+        acct.get("num_flags", 0),
+        cyc.get("peak", False),
+        val.get("peg"),
+        one_year_return,
+        moat.get("consistency", ""),
+        holdings,
+        l1.get("int_cov"),
+        l1.get("de"),
+        l1.get("pass", False),
+        acct.get("complete", False)
+    )
+
+    composite = composite_score(
+        l1, acct, moat, momentum, val
+    )
+
+    return {
+        "ticker": ticker,
+        "data": data,
+        "multi": multi,
+        "l1": l1,
+        "acct": acct,
+        "moat": moat,
+        "cyc": cyc,
+        "momentum": momentum,
+        "return_1y": one_year_return,
+        "valuation": val,
+        "holdings": holdings,
+        "tier": tier,
+        "size": size,
+        "tier_reason": tier_reason,
+        "composite": composite,
+        "excluded": False,
+    }
+
+
+def result_to_row(result: dict) -> dict:
+    l1 = result["l1"]
+    acct = result["acct"]
+    moat = result["moat"]
+    val = result["valuation"]
+    mom = result["momentum"]
+    holdings = result["holdings"]
+
+    latest_period = result["multi"][-1] if result.get("multi") else {}
+
+    net_debt_cr = None
+
+    if (
+        is_valid(latest_period.get("debt"))
+        and is_valid(latest_period.get("cash"))
+    ):
+        net_debt_cr = (
+            latest_period["debt"] - latest_period["cash"]
+        ) / 1e7
+
+    return {
+        "ticker": result["ticker"].replace(".NS", "").replace(".BO", ""),
+        "name": l1["name"],
+        "sector": l1["sector"],
+        "price": l1["price"],
+        "market_cap_cr": l1["mcap_cr"],
+        "pe": l1["pe"],
+        "peg": val["peg"],
+        "roe": l1["roe"],
+        "roce": l1["roce"],
+        "de": l1["de"],
+        "sales_cagr": l1["sales_cagr"],
+        "pat_cagr": l1["pat_cagr"],
+        "eps_growth": l1["eps_growth"],
+        "score": acct["score"],
+        "flags": acct["num_flags"],
+        "cfo_pat": acct["cum_cfo_pat"],
+        "cfo_ebitda": acct["cum_cfo_ebitda"],
+        "accrual_pct": acct["accrual_ratio"],
+        "moat_pct": moat["pct"],
+        "moat_status": moat["consistency"],
+        "earnings_momentum_score": mom["score"],
+        "eps_yoy": mom.get("latest_yoy"),
+        "fcf_yield": val["fcf_yield"],
+        "interest_coverage": l1["int_cov"],
+        "net_debt_cr": net_debt_cr,
+        "promoter_pct": holdings["promoter_pct"],
+        "promoter_pledge_pct": holdings["promoter_pledge_pct"],
+        "return_1y": result["return_1y"],
+        "tier": result["tier"],
+        "size": result["size"],
+        "tier_reason": result["tier_reason"],
+        "composite": result["composite"],
+    }
+
+
+# =============================================================================
+# LAYER DISPLAY AND VERDICT
+# =============================================================================
+def layer_rows(result: dict) -> list[tuple[str, str, str]]:
+    l1 = result["l1"]
+    acct = result["acct"]
+    moat = result["moat"]
+    val = result["valuation"]
+    mom = result["momentum"]
+
+    rows = []
+
+    checks = [
+        (
+            "Market capitalisation",
+            l1["mcap_pass"],
+            f"₹{fmt(l1['mcap_cr'], ',.0f')} Cr; minimum ₹15,000 Cr"
+        ),
+        (
+            "ROE",
+            l1["roe_pass"],
+            f"{fmt(l1['roe'], '.1f')}%; threshold >15%"
+        ),
+        (
+            "ROCE",
+            l1["roce_pass"],
+            f"{fmt(l1['roce'], '.1f')}%; threshold >18%"
+        ),
+        (
+            "Gross debt / equity",
+            l1["de_pass"],
+            f"{fmt(l1['de'], '.2f')}x; threshold <{MAX_DEBT_TO_EQUITY:.2f}x ({l1['de_source']})"
+        ),
+        (
+            "Revenue and PAT growth",
+            l1["growth_pass"],
+            f"Revenue {fmt(l1['sales_cagr'], '.1f')}% ({l1['sales_label']}); PAT {fmt(l1['pat_cagr'], '.1f')}% ({l1['pat_label']}); floor {l1['growth_floor']}%"
+        ),
     ]
-    # Deduplicate
-    seen = set()
-    deduped = []
-    for s in fallback:
-        if s not in seen:
-            seen.add(s)
-            deduped.append(s)
-    return [s + ".NS" for s in deduped][:max_stocks], 'hardcoded_nifty500'
 
-# ============================================================
-# APP UI
-# ============================================================
-st.markdown('<p class="main-title">High Compounder Framework v2</p>', unsafe_allow_html=True)
-st.markdown('<p class="sub-title">Systematic Indian Equity Screener — Leading + Lagging Indicators</p>', unsafe_allow_html=True)
-st.markdown("---")
+    for label, passed, detail in checks:
+        rows.append(
+            (label, "pass" if passed else "fail", detail)
+        )
 
-st.sidebar.title("Navigate")
-page = st.sidebar.radio("", ["Single Stock", "Compare", "Auto Top 10", "How It Works"], label_visibility="collapsed")
-st.sidebar.markdown("### Portfolio")
-portfolio_data = pd.DataFrame({
-    "Stock": ["LUPIN","DIXON","SIEMENS","BSE","MCX","ICICIPRULI","EICHER","POWERINDIA","PERSISTENT",
-              "KPIT","POLYCAB","HDFCAMC","COFORGE","VBL","CUMMINS"],
-    "Tier": ["FULL","FULL","FULL","STD","STD","STD","STD","STD","STD","HALF","HALF","HALF","HALF","HALF","HALF"],
-    "Score": [100,100,100,85,85,85,85,85,85,100,55,70,70,70,70],
-    "PEG": [0.14,0.54,0.91,0.38,0.51,1.46,1.60,1.07,1.79,1.48,1.67,1.42,1.32,1.52,2.46],
-})
-st.sidebar.dataframe(portfolio_data, hide_index=True, use_container_width=True)
+    ic = l1.get("int_cov")
+
+    if is_valid(ic):
+        rows.append((
+            "Interest coverage",
+            "fail" if ic < 3 else "warn" if ic < 8 else "pass",
+            f"{ic:.1f}x ({l1['int_cov_source']}); below 3x caps allocation at HALF"
+        ))
+    else:
+        rows.append((
+            "Interest coverage",
+            "warn",
+            l1["int_cov_source"]
+        ))
+
+    rows.append((
+        "Forensic accounting",
+        "pass" if acct.get("score", 0) >= 85 else "warn" if acct.get("score", 0) >= 50 else "fail",
+        f"Score {fmt(acct.get('score'), '.0f')}/100; {acct.get('num_flags', 0)} flags; multi-year data {'complete' if acct.get('complete') else 'limited'}"
+    ))
+
+    if acct.get("ccc"):
+        ccc = acct["ccc"]
+
+        rows.append((
+            "Cash conversion cycle",
+            "warn" if acct.get("ccc_trend") == "worsening" else "pass",
+            f"{ccc['ccc']:.1f} days; DSO {ccc['dso']:.1f}, DIO {ccc['dio']:.1f}, DPO {ccc['dpo']:.1f}; {acct.get('ccc_trend') or 'trend unavailable'}"
+        ))
+
+    else:
+        rows.append((
+            "Cash conversion cycle",
+            "warn",
+            "Not calculable; average balances and COGS are required"
+        ))
+
+    rows.append((
+        "ROE consistency / moat proxy",
+        "pass" if moat["consistency"] == "established moat proxy" else "warn" if moat["consistency"] == "emerging moat proxy" else "fail",
+        f"ROE >15% in {moat['years_above_15']}/{moat['total_years']} years; {moat['consistency']} — qualitative moat research still required"
+    ))
+
+    hold = result["holdings"]
+
+    rows.append((
+        "Ownership",
+        "warn" if hold["flags"] else "pass",
+        "; ".join(hold["flags"]) if hold["flags"] else "No manual ownership warning; verify source and date"
+    ))
+
+    peg = val.get("peg")
+
+    rows.append((
+        "PEG valuation",
+        "pass" if is_valid(peg) and peg <= 1 else "warn" if is_valid(peg) and peg <= 1.5 else "fail" if is_valid(peg) else "warn",
+        f"PEG {fmt(peg, '.2f')}; based on diluted EPS growth {fmt(val.get('peg_growth'), '.1f')}%"
+    ))
+
+    fcf = val.get("fcf_yield")
+
+    rows.append((
+        "FCF yield",
+        "pass" if is_valid(fcf) and fcf > 3 else "warn",
+        f"{fmt(fcf, '.1f')}%; negative FCF requires context; missing capex is not treated as zero"
+    ))
+
+    if val.get("pe_extreme"):
+        rows.append((
+            "Extreme P/E warning",
+            "warn",
+            f"P/E {l1['pe']:.1f}x exceeds 80x; warning only, not an automatic rejection"
+        ))
+
+    rows.append((
+        "Earnings momentum",
+        "pass" if mom.get("score", 40) >= 70 else "fail" if mom.get("score", 40) <= 20 else "warn",
+        f"{mom.get('status')}; latest YoY EPS {fmt(mom.get('latest_yoy'), '+.1f')}%"
+    ))
+
+    cyc = result["cyc"]
+
+    rows.append((
+        "Cyclical ROE",
+        "warn" if cyc.get("peak") else "pass",
+        cyc.get("note", "")
+    ))
+
+    rows.append((
+        "One-year price return",
+        "fail" if is_valid(result["return_1y"]) and result["return_1y"] < -30 else "warn" if not is_valid(result["return_1y"]) else "pass",
+        f"{fmt(result['return_1y'], '+.1f')}%; a decline triggers thesis review"
+    ))
+
+    return rows
+
+
+def build_verdict(result: dict) -> str:
+    l1 = result["l1"]
+    acct = result["acct"]
+    val = result["valuation"]
+    tier = result["tier"]
+    size = result["size"]
+
+    opening = {
+        "FULL": "This company meets the framework's highest quantitative conviction requirements.",
+        "STANDARD": "This company clears much of the quality assessment but does not meet every FULL-tier condition.",
+        "HALF": "This company has a mixed profile and should receive limited exposure, if any, pending further research.",
+        "WATCH": "The framework does not currently support deploying capital in this company.",
+    }[tier]
+
+    details = [opening]
+
+    details.append(
+        f"ROE is {fmt(l1['roe'], '.1f')}%, ROCE is {fmt(l1['roce'], '.1f')}%, gross D/E is {fmt(l1['de'], '.2f')}x, and forensic score is {fmt(acct['score'], '.0f')}/100."
+    )
+
+    details.append(
+        f"Revenue CAGR is {fmt(l1['sales_cagr'], '.1f')}%, PAT CAGR is {fmt(l1['pat_cagr'], '.1f')}%, and diluted EPS growth used for PEG is {fmt(l1['eps_growth'], '.1f')}%."
+    )
+
+    details.append(
+        f"PEG is {fmt(val['peg'], '.2f')} and FCF yield is {fmt(val['fcf_yield'], '.1f')}%."
+    )
+
+    if acct.get("flags"):
+        details.append(
+            "Forensic / working-capital flags: "
+            + "; ".join(acct["flags"][:4]) + "."
+        )
+
+    if result["holdings"].get("flags"):
+        details.append(
+            "Ownership review: "
+            + "; ".join(result["holdings"]["flags"][:3]) + "."
+        )
+
+    details.append(
+        f"Allocation rule: {result['tier_reason']}. Suggested tier size: {size}."
+    )
+
+    details.append(
+        "This is a screening output, not a final investment recommendation. Review annual reports, concalls, governance, industry structure and valuation assumptions before investing."
+    )
+
+    return " ".join(details)
+
+
+def build_scorecard_html(result: dict) -> str:
+    """Create a printable one-page HTML summary for a single company."""
+
+    l1 = result["l1"]
+    acct = result["acct"]
+    val = result["valuation"]
+
+    rows = []
+
+    for label, status, detail in layer_rows(result):
+        status_text = {
+            "pass": "PASS",
+            "warn": "REVIEW",
+            "fail": "FAIL"
+        }.get(status, status.upper())
+
+        rows.append(
+            "<tr>"
+            f"<td>{html.escape(label)}</td>"
+            f"<td><strong>{status_text}</strong></td>"
+            f"<td>{html.escape(detail)}</td>"
+            "</tr>"
+        )
+
+    metrics = [
+        ("P/E", fmt(l1.get("pe"), ".1f")),
+        ("PEG", fmt(val.get("peg"), ".2f")),
+        ("ROE", fmt(l1.get("roe"), ".1f", "%")),
+        ("ROCE", fmt(l1.get("roce"), ".1f", "%")),
+        ("Debt / equity", fmt(l1.get("de"), ".2f", "x")),
+        ("Forensic score", fmt(acct.get("score"), ".0f") + "/100"),
+        ("FCF yield", fmt(val.get("fcf_yield"), ".1f", "%")),
+        ("1Y return", fmt(result.get("return_1y"), "+.1f", "%")),
+    ]
+
+    metric_html = "".join(
+        f"<td><small>{html.escape(label)}</small><br><b>{html.escape(value)}</b></td>"
+        for label, value in metrics
+    )
+
+    verdict = html.escape(build_verdict(result))
+
+    return f"""<!doctype html><html><head><meta charset='utf-8'><title>{html.escape(l1['name'])} — High Compounder</title>
+    <style>body{{font-family:Arial,sans-serif;color:#172033;margin:28px}}h1{{color:{NAVY}}}table{{border-collapse:collapse;width:100%;margin:14px 0}}td,th{{border:1px solid #ddd;padding:8px;text-align:left;font-size:12px}}small{{color:#687386}}.tier{{display:inline-block;padding:6px 12px;border-radius:14px;background:#eaf0f8;font-weight:bold}}.verdict{{padding:14px;background:#f7f8fa;border:1px solid #ddd;line-height:1.6}}@media print{{body{{margin:10mm}}}}</style></head><body>
+    <h1>High Compounder Framework v2.1</h1><h2>{html.escape(l1['name'])}</h2>
+    <p>{html.escape(result['ticker'])} · {html.escape(l1['sector'])} · CMP ₹{fmt(l1.get('price'), ',.2f')} · {datetime.now():%d %b %Y}</p>
+    <p class='tier'>{html.escape(result['tier'])} · {html.escape(result['size'])}</p>
+    <table><tr>{metric_html}</tr></table><h3>Layer results</h3>
+    <table><tr><th>Layer</th><th>Result</th><th>Details</th></tr>{''.join(rows)}</table>
+    <h3>Investment assessment</h3><div class='verdict'>{verdict}</div>
+    <p style='font-size:10px;color:#777;margin-top:20px'>Quantitative screening output, not investment advice. Verify data against company filings and conduct independent research.</p>
+    </body></html>"""
+
+
+# =============================================================================
+# BATCH SCREENER AND SECTOR CONSTRAINT
+# =============================================================================
+def analyse_for_funnel(
+    ticker: str,
+    ownership_overrides: dict
+) -> tuple[dict | None, str]:
+
+    data = fetch_stock(ticker)
+
+    if not data:
+        return None, "fetch_fail"
+
+    if is_financial_company(data["info"], ticker):
+        return None, "financial"
+
+    multi, align_warnings = build_multi(
+        data.get("fin"),
+        data.get("bs"),
+        data.get("cf")
+    )
+
+    if len(multi) < 2:
+        return None, "data"
+
+    data["debug"]["warnings"].extend(align_warnings)
+
+    l1 = run_layer1(data, ticker, multi)
+
+    # Batch mode is a strict hard-filter screen.
+    # Single-stock mode can show exceptions capped at HALF.
+    for key, reason in (
+        ("mcap_pass", "mcap"),
+        ("de_pass", "debt"),
+        ("roe_pass", "roe"),
+        ("roce_pass", "roce"),
+        ("growth_pass", "growth")
+    ):
+        if not l1[key]:
+            return None, reason
+
+    acct = run_forensic(multi)
+
+    if acct.get("score") is None:
+        return None, "data"
+
+    moat = run_moat(multi)
+    cyc = run_cyclical(multi)
+    momentum = run_momentum(data.get("qfin"))
+    ret = extract_one_year_return(data)
+
+    val = run_valuation(
+        l1["pe"],
+        l1["eps_growth"],
+        l1["sales_cagr"],
+        data,
+        l1["mcap"]
+    )
+
+    holdings = run_holdings_analysis(
+        data.get("yahoo_holdings", {}),
+        ownership_overrides.get(ticker, {})
+    )
+
+    tier, size, tier_reason = get_tier(
+        acct["score"],
+        acct["num_flags"],
+        cyc.get("peak", False),
+        val.get("peg"),
+        ret,
+        moat["consistency"],
+        holdings,
+        l1.get("int_cov"),
+        l1.get("de"),
+        l1["pass"],
+        acct.get("complete", False)
+    )
+
+    result = {
+        "ticker": ticker,
+        "data": data,
+        "multi": multi,
+        "l1": l1,
+        "acct": acct,
+        "moat": moat,
+        "cyc": cyc,
+        "momentum": momentum,
+        "return_1y": ret,
+        "valuation": val,
+        "holdings": holdings,
+        "tier": tier,
+        "size": size,
+        "tier_reason": tier_reason,
+        "composite": composite_score(l1, acct, moat, momentum, val),
+        "excluded": False,
+    }
+
+    return result, "pass"
+
+
+def select_with_sector_limit(
+    candidates: pd.DataFrame,
+    top_n: int,
+    max_sector_pct: float = 30.0
+) -> pd.DataFrame:
+    """Keep top-ranked candidates and replace weakest overrepresented-sector names.
+
+    The cap is measured as a share of the selected portfolio's midpoint allocation.
+    If there are not enough alternative sectors, the function keeps the best available
+    names and the UI reports that the cap could not be fully met.
+    """
+
+    if candidates.empty:
+        return candidates
+
+    ranked = candidates.sort_values("composite", ascending=False).copy()
+    selected = ranked.head(top_n).copy()
+    remaining = ranked.loc[~ranked.index.isin(selected.index)].copy()
+
+    def sector_weights(frame: pd.DataFrame) -> tuple[dict, float]:
+        alloc = frame["tier"].map(TIER_MIDPOINT).fillna(0.0)
+        total = float(alloc.sum())
+        grouped = alloc.groupby(frame["sector"]).sum().to_dict()
+        return grouped, total
+
+    max_iter = len(ranked) + 1
+
+    for _ in range(max_iter):
+        grouped, total = sector_weights(selected)
+
+        if total <= 0:
+            break
+
+        over = [
+            (sector, amount / total * 100)
+            for sector, amount in grouped.items()
+            if amount / total * 100 > max_sector_pct
+        ]
+
+        if not over:
+            break
+
+        over_sector = max(over, key=lambda x: x[1])[0]
+
+        sector_rows = selected[
+            selected["sector"] == over_sector
+        ].sort_values("composite", ascending=True)
+
+        if sector_rows.empty:
+            break
+
+        weakest_idx = sector_rows.index[0]
+        replacement = None
+        best_share = float("inf")
+
+        current_share = grouped.get(over_sector, 0.0) / total * 100
+
+        for idx, candidate in remaining.sort_values(
+            "composite",
+            ascending=False
+        ).iterrows():
+
+            if candidate["sector"] == over_sector:
+                continue
+
+            test = pd.concat([
+                selected.drop(index=weakest_idx),
+                candidate.to_frame().T
+            ])
+
+            weights, test_total = sector_weights(test)
+
+            if test_total <= 0:
+                continue
+
+            proposed_share = weights.get(over_sector, 0.0) / test_total * 100
+
+            if proposed_share < current_share and proposed_share < best_share:
+                replacement = (idx, candidate)
+                best_share = proposed_share
+
+                if proposed_share <= max_sector_pct:
+                    break
+
+        if replacement is None:
+            break
+
+        replacement_idx, replacement_row = replacement
+
+        selected = selected.drop(index=weakest_idx)
+        selected.loc[replacement_idx] = replacement_row
+
+        remaining = remaining.drop(index=replacement_idx)
+        remaining.loc[weakest_idx] = candidates.loc[weakest_idx]
+
+    return selected.sort_values("composite", ascending=False)
+
+
+# =============================================================================
+# STREAMLIT SIDEBAR INPUTS
+# =============================================================================
+st.sidebar.title("Navigation")
+
+page = st.sidebar.radio(
+    "",
+    ["Single Stock", "Compare", "Auto Top 10", "How It Works"],
+    label_visibility="collapsed"
+)
+
+st.sidebar.markdown("---")
+st.sidebar.subheader("Data inputs")
+
+universe_upload = st.sidebar.file_uploader(
+    "Latest official Nifty 500 CSV (optional)",
+    type=["csv"],
+    key="universe_csv"
+)
+
+ownership_upload = st.sidebar.file_uploader(
+    "Verified ownership CSV (optional)",
+    type=["csv"],
+    key="ownership_csv",
+    help="Columns: ticker, promoter_pct, institutional_pct, promoter_pledge_pct, as_of, source"
+)
+
+ownership_overrides = load_ownership_overrides(ownership_upload)
+
+st.sidebar.caption(
+    "Yahoo insider ownership is informational only; it is not treated as Indian promoter shareholding."
+)
+
 if st.sidebar.button("Clear cache & reload"):
     st.cache_data.clear()
     st.rerun()
-st.sidebar.caption("Vinayak Nagral · Sep 2026")
 
-# ============================
-# PAGE: SINGLE STOCK
-# ============================
+st.sidebar.caption("High Compounder Framework v2.1 · Research tool")
+
+
+# =============================================================================
+# SINGLE STOCK PAGE
+# =============================================================================
+st.markdown(
+    '<p class="main-title">High Compounder Framework v2.1</p>',
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    '<p class="sub-title">Systematic Indian equity screener · corrected data alignment, cash-flow tests and allocation rules</p>',
+    unsafe_allow_html=True
+)
+
+st.markdown("---")
+
 if page == "Single Stock":
-    c1, c2 = st.columns([4, 1])
-    with c1:
-        ti = st.text_input("Enter NSE ticker", value="LUPIN", placeholder="LUPIN, INFY, TCS, DIXON").strip().upper()
-    with c2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        go = st.button("Analyse", type="primary", use_container_width=True)
-    qc = st.columns(7)
-    for i, q in enumerate(["LUPIN", "BSE", "DIXON", "INFY", "HDFCAMC", "MAZDOCK", "HCLTECH"]):
-        with qc[i]:
-            if st.button(q, key=f"q_{q}", use_container_width=True):
-                ti = q; go = True
-    if not ti.endswith(".NS"):
-        ti += ".NS"
-    if go:
-        with st.spinner(f"Analysing {ti.replace('.NS', '')}..."):
-            res = full_analysis(ti)
-        if not res:
-            st.error(f"Could not fetch data for **{ti.replace('.NS', '')}**. Check the ticker — NSE symbol like LUPIN, INFY, TCS.")
-            st.stop()
-        l1, acct, val, mom, ret, moat, cyc = res['l1'], res['acct'], res['val'], res['mom'], res['ret'], res['moat'], res['cyc']
-        tier, size, layers, verdict, bank = res['tier'], res['size'], res['layers'], res['verdict'], res['bank']
-        holdings = res.get('holdings', dict(DEFAULT_HOLDINGS))
-        name, sector, price = l1['name'], l1['sector'], l1['price']
-        st.markdown(f'<p class="stock-name">{name}</p>', unsafe_allow_html=True)
-        st.markdown(f'<p class="stock-meta">{ti} | {sector} | {"Rs " + f"{price:,.2f}" if is_valid(price) else "-"} | CMP as of {datetime.now().strftime("%d %b %Y, %I:%M %p")}</p>', unsafe_allow_html=True)
-        if bank:
-            st.info("Banking/Financial — framework for non-financials. Scores for reference.")
-        st.markdown("---")
-        if res.get('html'):
-            fn = f"{name.replace(' ', '_')}_Scorecard_{datetime.now().strftime('%d%b%Y')}.html"
-            st.download_button("Download scorecard", data=res['html'], file_name=fn, mime="text/html", help="Open in browser, Ctrl+P, Save as PDF")
 
-        cols = st.columns(8)
-        score_display = f"{acct.get('score', '-')}/100" if acct.get('score') is not None else "-"
-        int_cov = l1.get('int_cov')
-        card_data = [
-            ("Score", score_display), ("PE", fmt(l1['pe'], '.1f')), ("PEG", fmt(val.get('peg'), '.2f')),
-            ("ROE", fmt(l1['roe'], '.1f', '%')), ("Int Cov", fmt(int_cov, '.1f', 'x') if is_valid(int_cov) else "N/A"),
-            ("FCF Yield", fmt(val.get('fcf_yield'), '.1f', '%')),
-            ("1Y Return", fmt(ret, '+.1f', '%')), ("Tier", "")]
-        for i, (lb, vl) in enumerate(card_data):
-            with cols[i]:
-                if lb == "Tier":
-                    st.markdown(f'<div class="metric-card"><div class="metric-lbl">Tier</div><span class="tier-badge tier-{tier.lower()}">{tier} {size}</span></div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="metric-card"><div class="metric-lbl">{lb}</div><div class="metric-val">{vl}</div></div>', unsafe_allow_html=True)
-        st.markdown("---"); st.subheader("Layer-by-layer breakdown")
-        for ln, st2, dt in layers:
-            ic = "✅" if st2 == "pass" else "❌" if st2 == "fail" else "⚠️"
-            lead_tag = ' <span class="leading-tag">LEADING</span>' if '★' in ln else ''
-            ln_clean = ln.replace(' ★', '')
-            st.markdown(f'<div class="layer-row layer-{st2}">{ic} <strong>{ln_clean}:</strong>{lead_tag} {dt}</div>', unsafe_allow_html=True)
-        st.markdown("---"); st.subheader("Investment verdict")
-        st.markdown(f'<div class="verdict-box">{verdict}</div>', unsafe_allow_html=True)
-        st.markdown("---")
-        t1, t2, t3, t4 = st.tabs(["Forensic", "Cyclical & valuation", "Momentum & Holdings", "Debug"])
-        with t1:
-            if acct.get('score') is not None:
-                sc2 = acct['score']
-                css = "score-green" if sc2 >= 85 else "score-yellow" if sc2 >= 50 else "score-red"
-                st.markdown(f'<div class="score-card {css}"><h2>{sc2}/100</h2></div>', unsafe_allow_html=True)
-                ca, cb, cc_col = st.columns(3)
-                with ca:
-                    st.markdown("**Cumulative CFO/PAT**")
-                    v2 = acct.get('cum_cfo_pat')
-                    if is_valid(v2):
-                        st.markdown(f"{'✅' if v2 >= 0.7 else '⚠️' if v2 >= 0.5 else '❌'} **{v2}x**")
-                with cb:
-                    st.markdown("**Cumulative CFO/EBITDA**")
-                    v3 = acct.get('cum_cfo_ebitda')
-                    if is_valid(v3):
-                        st.markdown(f"{'✅' if v3 >= 0.7 else '⚠️' if v3 >= 0.5 else '❌'} **{v3}x**")
-                with cc_col:
-                    st.markdown("**Accrual Ratio**")
-                    ar = acct.get('accrual_ratio')
-                    if is_valid(ar):
-                        st.markdown(f"{'✅' if ar < 10 else '⚠️' if ar < 20 else '❌'} **{ar}%**")
-                    else:
-                        st.markdown("N/A")
-                mby = acct.get('margins_by_year', [])
-                if mby:
-                    trend_icon = '📈' if acct.get('margin_trend') == 'expanding' else '📉' if acct.get('margin_trend') == 'contracting' else '➡️'
-                    st.markdown(f"**EBITDA Margins:** {' -> '.join(f'{m[0]}: {m[1]}%' for m in mby)} {trend_icon}")
-                # Interest coverage trend
-                ict = acct.get('int_cov_trend', [])
-                if ict:
-                    st.markdown(f"**Interest Coverage Trend:** {' -> '.join(f'{y}: {v}x' for y, v in ict)}")
-                ccc = acct.get('ccc')
-                if ccc:
-                    trend_str = acct.get('ccc_trend', '') or ''
-                    trend_icon = '📈' if trend_str == 'worsening' else '📉' if trend_str == 'improving' else '➡️'
-                    st.markdown(f"**Cash Conversion Cycle:** {ccc['ccc']}d (Recv {ccc['days_recv']}d + Inv {ccc['days_inv']}d - Pay {ccc['days_pay']}d) {trend_str} {trend_icon}")
-                if acct.get('flags'):
-                    for f in acct['flags']:
-                        st.markdown(f'<div class="flag-item">⚠ {f}</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown('<div class="clean-item">✅ All checks passed — 0 flags</div>', unsafe_allow_html=True)
-        with t2:
-            cc, cd = st.columns(2)
-            with cc:
-                if cyc.get('roe_by_year'):
-                    st.dataframe(pd.DataFrame(list(cyc['roe_by_year'].items()), columns=['Year', 'ROE%']), hide_index=True, use_container_width=True)
-                # NEW: Show quarterly ROE if available
-                q_roe = moat.get('quarterly_roe', [])
-                if q_roe:
-                    st.markdown("**Quarterly rolling ROE (extended moat)**")
-                    st.dataframe(pd.DataFrame(q_roe, columns=['Period', 'ROE%']), hide_index=True, use_container_width=True)
-                st.markdown(f"**Moat:** {moat.get('years_above_15', 0)}/{moat.get('total_years', 0)} yrs ROE>15% — **{moat.get('consistency', '-')}**")
-            with cd:
-                peg_note = " (using revenue growth)" if val.get('peg_turnaround') else ""
-                st.markdown(f"**PE:** {fmt(l1['pe'], '.1f')} | **PEG:** {fmt(val.get('peg'), '.2f')}{peg_note} | **FCF Yield:** {fmt(val.get('fcf_yield'), '.1f', '%')}")
-                st.markdown(f"**Sales CAGR ({l1.get('sales_cagr_label','')}):** {fmt(l1.get('sales_cagr'), '.1f')}% | **PAT CAGR ({l1.get('pat_cagr_label','')}):** {fmt(l1.get('pat_cagr'), '.1f')}%")
-                # NEW: Net debt display
-                nd = l1.get('net_debt_cr')
-                if is_valid(nd):
-                    nd_label = f"Rs {abs(nd):,.0f} Cr" + (" net cash" if nd < 0 else " net debt")
-                    st.markdown(f"**Net Debt:** {nd_label}")
-        with t3:
-            # Momentum
-            if mom.get('available'):
-                mc1, mc2 = st.columns(2)
-                mc1.metric("Latest QoQ", fmt(mom.get('latest_qoq'), '+.1f', '%'))
-                mc2.metric("Prior QoQ", fmt(mom.get('prior_qoq'), '+.1f', '%'))
-                if mom.get('eps'):
-                    st.dataframe(pd.DataFrame({'Quarter': mom['quarters'], 'EPS': [round(e, 2) for e in mom['eps']]}), hide_index=True, use_container_width=True)
-            else:
-                st.info("Insufficient quarterly data for momentum analysis.")
-            st.markdown(f"**1Y Return:** {fmt(ret, '+.1f', '%')}")
-            # NEW: Holdings section
-            st.markdown("---")
-            st.markdown("### Promoter & Institutional Holdings")
-            h1, h2, h3 = st.columns(3)
-            with h1:
-                ins = holdings.get('insider_pct')
-                st.metric("Insider/Promoter %", f"{ins}%" if is_valid(ins) else "N/A")
-            with h2:
-                inst = holdings.get('inst_pct')
-                st.metric("Institutional %", f"{inst}%" if is_valid(inst) else "N/A")
-            with h3:
-                inst_c = holdings.get('inst_count')
-                st.metric("# Institutions", f"{inst_c:,}" if is_valid(inst_c) else "N/A")
-            if holdings.get('flags'):
-                for hf in holdings['flags']:
-                    st.markdown(f'<div class="flag-item">⚠ {hf}</div>', unsafe_allow_html=True)
-            elif is_valid(ins):
-                st.markdown('<div class="clean-item">✅ Holdings profile acceptable</div>', unsafe_allow_html=True)
-        with t4:
-            dbg = res['sd'].get('debug', {})
-            dy = dbg.get('data_years', {})
-            st.markdown("**Data availability**")
-            for k, v in dy.items():
-                st.markdown(f'<div class="debug-row"><span class="debug-label">{k}</span> <span class="debug-val">{v}</span> {"✅" if v > 0 else "❌"}</div>', unsafe_allow_html=True)
-            st.markdown("**Fallbacks triggered**")
-            fbs = dbg.get('fallbacks', [])
-            if fbs:
-                for fb in fbs:
-                    st.markdown(f'<div class="debug-row"><span class="debug-fb">↳ {fb}</span></div>', unsafe_allow_html=True)
-            else:
-                st.markdown('<div class="debug-row"><span class="debug-ok">None — all primary sources used</span></div>', unsafe_allow_html=True)
-            warns = dbg.get('warnings', [])
-            if warns:
-                st.markdown("**Warnings**")
-                for w in warns:
-                    st.markdown(f'<div class="debug-row"><span class="debug-bad">⚠ {w}</span></div>', unsafe_allow_html=True)
-            st.markdown("**Decision chain**")
-            chain = [
-                ('Price', fmt(l1['price'], ',.2f'), 'primary'),
-                ('PE', fmt(l1['pe'], '.1f'), l1.get('pe_source', '?')),
-                ('ROE', fmt(l1['roe'], '.1f', '%'), l1.get('roe_source', '?')),
-                ('ROCE', fmt(l1['roce'], '.1f', '%'), 'EBIT/(TA-CL)'),
-                ('D/E', fmt(l1['de'], '.2f'), 'info/manual'),
-                ('Int Coverage', fmt(l1.get('int_cov'), '.1f', 'x'), l1.get('int_cov_source', '?')),
-                ('Net Debt', fmt(l1.get('net_debt_cr'), ',.0f', ' Cr'), 'Debt-Cash'),
-                ('Sales CAGR', fmt(l1.get('sales_cagr'), '.1f', '%'), l1.get('sales_cagr_debug', '?')),
-                ('PAT CAGR', fmt(l1.get('pat_cagr'), '.1f', '%'), l1.get('pat_cagr_debug', '?')),
-                ('Growth floor', f"{l1.get('growth_floor', 15)}%", 'relaxed' if l1.get('growth_relaxed') else 'standard'),
-                ('Forensic score', str(acct.get('score', '?')), f"{acct.get('num_flags', 0)} flags"),
-                ('Accrual ratio', fmt(acct.get('accrual_ratio'), '.1f', '%'), 'NI-CFO / AvgAssets'),
-                ('Moat', moat.get('consistency', '?'), f"{moat.get('pct', 0)}% ({moat.get('extended_total', moat.get('total_years', 0))} pts)"),
-                ('Insider %', fmt(holdings.get('insider_pct'), '.1f', '%'), 'major_holders'),
-                ('PEG', fmt(val.get('peg'), '.2f'), f"growth={val.get('peg_growth', '?')}{'(turnaround)' if val.get('peg_turnaround') else ''}"),
-                ('1Y Return', fmt(ret, '+.1f', '%'), 'momentum risk' if is_valid(ret) and ret < -30 else 'ok' if is_valid(ret) else 'no data'),
-                ('TIER', tier, size),
+    col1, col2 = st.columns([4, 1])
+
+    with col1:
+        ticker_input = st.text_input(
+            "Enter NSE ticker",
+            value="LUPIN",
+            placeholder="LUPIN, INFY, TCS"
+        ).strip().upper()
+
+    with col2:
+        st.write("")
+        run_button = st.button(
+            "Analyse",
+            type="primary",
+            use_container_width=True
+        )
+
+    quick_cols = st.columns(6)
+
+    for col, symbol in zip(
+        quick_cols,
+        ["LUPIN", "BSE", "DIXON", "INFY", "MAZDOCK", "HCLTECH"]
+    ):
+        if col.button(symbol, use_container_width=True):
+            ticker_input, run_button = symbol, True
+
+    if run_button:
+
+        ticker = clean_ticker(ticker_input)
+
+        with st.spinner(f"Analysing {ticker}..."):
+            result = analyse_stock(ticker, ownership_overrides)
+
+        if result is None:
+            st.error(
+                "Unable to fetch usable data. Check the ticker or try again later."
+            )
+
+        elif result.get("excluded"):
+            st.warning(
+                f"{ticker}: {result['excluded_reason']}. No non-financial allocation tier has been assigned."
+            )
+
+        else:
+            l1 = result["l1"]
+
+            st.subheader(l1["name"])
+
+            st.caption(
+                f"{ticker} · {l1['sector']} · CMP ₹{fmt(l1['price'], ',.2f')} · {datetime.now():%d %b %Y %H:%M}"
+            )
+
+            if result["data"]["debug"].get("warnings"):
+                with st.expander("Data-quality warnings", expanded=False):
+                    for message in result["data"]["debug"]["warnings"]:
+                        st.warning(message)
+
+            cards = st.columns(8)
+
+            card_values = [
+                ("Forensic", f"{fmt(result['acct']['score'], '.0f')}/100"),
+                ("P/E", fmt(l1["pe"], '.1f')),
+                ("PEG", fmt(result["valuation"]["peg"], '.2f')),
+                ("ROE", fmt(l1["roe"], '.1f', '%')),
+                ("ROCE", fmt(l1["roce"], '.1f', '%')),
+                ("D/E", fmt(l1["de"], '.2f', 'x')),
+                ("FCF yield", fmt(result["valuation"]["fcf_yield"], '.1f', '%')),
+                ("Tier", f"{result['tier']} {result['size']}"),
             ]
-            for label, value, source in chain:
-                st.markdown(f'<div class="debug-row"><span class="debug-label">{label}</span> <span class="debug-val">{value}</span> <span class="debug-fb">← {source}</span></div>', unsafe_allow_html=True)
-            st.markdown("**Raw info fields**")
-            for k in ['currentPrice','trailingPE','forwardPE','trailingEps','marketCap','sharesOutstanding','shortName','sector','industry','debtToEquity','returnOnEquity','revenueGrowth','earningsGrowth']:
-                v = res['info'].get(k, '—')
-                ok = is_valid(v) or (isinstance(v, str) and v.strip() and v != '—')
-                st.markdown(f'<div class="debug-row"><span class="debug-label">{k}</span> <span class="debug-val">{str(v)[:50]}</span> {"✅" if ok else "❌"}</div>', unsafe_allow_html=True)
-        st.caption("Research only, not investment advice | Yahoo Finance")
 
-# ============================
-# PAGE: COMPARE
-# ============================
-elif page == "Compare":
-    st.subheader("Compare stocks")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        t1_in = st.text_input("Stock 1", value="LUPIN").strip().upper()
-    with c2:
-        t2_in = st.text_input("Stock 2", value="INFY").strip().upper()
-    with c3:
-        t3_in = st.text_input("Stock 3 (optional)", value="").strip().upper()
-    if st.button("Compare", type="primary", use_container_width=True):
-        tickers = [t + ".NS" if not t.endswith(".NS") else t for t in [t1_in, t2_in, t3_in] if t]
-        results = {}
-        for t in tickers:
-            with st.spinner(f"Analysing {t.replace('.NS', '')}..."):
-                r = full_analysis(t)
-            if r:
-                results[t] = r
-            else:
-                st.warning(f"Could not fetch **{t.replace('.NS', '')}** — check the ticker.")
-        if len(results) < 2:
-            st.error("Need at least 2 valid stocks."); st.stop()
-        best_peg = min(results.items(), key=lambda x: x[1]['val'].get('peg') or 999)
-        strongest_moat = max(results.items(), key=lambda x: x[1]['moat'].get('pct', 0))
-        st.markdown(f"**{best_peg[1]['l1']['name']}** offers the widest PEG discount at {fmt(best_peg[1]['val'].get('peg'), '.2f')} with {best_peg[1]['acct'].get('score', '-')}/100 forensic quality. **{strongest_moat[1]['l1']['name']}** has the strongest moat at {strongest_moat[1]['moat'].get('pct', 0)}%.")
-        st.markdown("---")
-        metric_defs = [
-            ('Tier', lambda r: r['tier'], None),
-            ('Score', lambda r: f"{r['acct'].get('score', '-')}/100", lambda r: r['acct'].get('score') or 0),
-            ('PE', lambda r: fmt(r['l1']['pe'], '.1f'), lambda r: -(r['l1'].get('pe') or 999)),
-            ('PEG', lambda r: fmt(r['val'].get('peg'), '.2f'), lambda r: -(r['val'].get('peg') or 999)),
-            ('ROE', lambda r: fmt(r['l1']['roe'], '.1f', '%'), lambda r: r['l1'].get('roe') or 0),
-            ('ROCE', lambda r: fmt(r['l1']['roce'], '.1f', '%'), lambda r: r['l1'].get('roce') or 0),
-            ('D/E', lambda r: fmt(r['l1']['de'], '.2f'), lambda r: -(r['l1'].get('de') or 999)),
-            ('Int Coverage', lambda r: fmt(r['l1'].get('int_cov'), '.1f', 'x'), lambda r: r['l1'].get('int_cov') or 0),
-            ('Sales CAGR', lambda r: fmt(r['l1'].get('sales_cagr'), '.1f', '%'), lambda r: r['l1'].get('sales_cagr') or 0),
-            ('PAT CAGR', lambda r: fmt(r['l1'].get('pat_cagr'), '.1f', '%'), lambda r: r['l1'].get('pat_cagr') or 0),
-            ('CFO/PAT', lambda r: fmt(r['acct'].get('cum_cfo_pat'), '.2f', 'x'), lambda r: r['acct'].get('cum_cfo_pat') or 0),
-            ('Accrual %', lambda r: fmt(r['acct'].get('accrual_ratio'), '.1f', '%'), lambda r: -(r['acct'].get('accrual_ratio') or 999)),
-            ('FCF Yield', lambda r: fmt(r['val'].get('fcf_yield'), '.1f', '%'), lambda r: r['val'].get('fcf_yield') or 0),
-            ('Moat', lambda r: f"{r['moat'].get('pct', 0)}% ({r['moat'].get('consistency', '')})", lambda r: r['moat'].get('pct', 0)),
-            ('Insider %', lambda r: fmt(r.get('holdings', {}).get('insider_pct'), '.1f', '%'), lambda r: r.get('holdings', {}).get('insider_pct') or 0),
-            ('1Y Return', lambda r: fmt(r['ret'], '+.1f', '%'), lambda r: r['ret'] or 0),
-        ]
-        names = [r['l1']['name'] for r in results.values()]
-        header = "| Metric | " + " | ".join(names) + " |\n|---|" + "|".join(["---"] * len(names)) + "|\n"
-        rows = ""
-        for mname, display_fn, rank_fn in metric_defs:
-            vals_display = [display_fn(r) for r in results.values()]
-            if rank_fn:
-                scores = [rank_fn(r) for r in results.values()]
-                best_idx = scores.index(max(scores))
-                vals_display = [f"**{v}**" if i == best_idx else v for i, v in enumerate(vals_display)]
-            rows += f"| {mname} | " + " | ".join(vals_display) + " |\n"
-        st.markdown(header + rows)
-        st.markdown("---")
-        for t, r in results.items():
-            with st.expander(f"**{r['l1']['name']}** — {r['tier']} {r['size']}", expanded=True):
-                st.markdown(f'<div class="verdict-box">{r["verdict"]}</div>', unsafe_allow_html=True)
+            for col, (label, value) in zip(cards, card_values):
+                col.markdown(
+                    f'<div class="metric-card"><div class="metric-lbl">{html.escape(label)}</div><div class="metric-val">{html.escape(value)}</div></div>',
+                    unsafe_allow_html=True
+                )
 
-# ============================
-# PAGE: AUTO TOP 10
-# ============================
-elif page == "Auto Top 10":
-    st.subheader("Automatic Top 10 Picker")
-    c1, c2 = st.columns(2)
-    with c1:
-        mx = st.slider("Stocks to screen", 20, 500, 200, 10)
-    with c2:
-        tn = st.slider("Show top N", 5, 30, 10)
-    sector_cap_on = st.checkbox("Apply 30% sector cap", value=True)
-    if st.button("Run screen", type="primary", use_container_width=True):
-        tickers, source = get_nifty_tickers(mx)
-        st.caption(f"Source: {source} | {len(tickers)} tickers loaded (requested {mx})")
-        results = []
-        funnel = {'total': len(tickers), 'banking': 0, 'mcap': 0, 'debt': 0, 'roe': 0, 'roce': 0, 'growth': 0, 'data': 0, 'fetch_fail': 0, 'pass': 0}
-        prog = st.progress(0)
-        batch_size = 5
-        for i, t in enumerate(tickers):
-            prog.progress((i + 1) / len(tickers), f"{t.replace('.NS', '')} ({i + 1}/{len(tickers)})")
-            r, reason = analyse_with_funnel(t)
-            funnel[reason] = funnel.get(reason, 0) + 1
-            if r:
-                results.append(r)
-            # BUG FIX: adaptive throttling — slower for larger batches
-            if (i + 1) % batch_size == 0:
-                if len(tickers) > 200:
-                    time.sleep(1.0)
-                elif len(tickers) > 100:
-                    time.sleep(0.7)
+            st.markdown("### Layer-by-layer assessment")
+
+            for label, status, detail in layer_rows(result):
+                icon = (
+                    "✅" if status == "pass"
+                    else "❌" if status == "fail"
+                    else "⚠️"
+                )
+
+                st.markdown(
+                    f'<div class="layer-row layer-{status}">{icon} <strong>{html.escape(label)}:</strong> {html.escape(detail)}</div>',
+                    unsafe_allow_html=True
+                )
+
+            st.markdown("### Investment verdict")
+
+            st.markdown(
+                f'<div class="verdict-box">{html.escape(build_verdict(result))}</div>',
+                unsafe_allow_html=True
+            )
+
+            st.caption(
+                f"Composite research score: {result['composite']}/100 · Allocation rationale: {result['tier_reason']}"
+            )
+
+            t1, t2, t3, t4 = st.tabs([
+                "Forensic & cash flow",
+                "ROE & cyclicality",
+                "Momentum & ownership",
+                "Debug"
+            ])
+
+            with t1:
+                st.metric(
+                    "Forensic score",
+                    fmt(result["acct"].get("score"), '.0f') + "/100"
+                )
+
+                st.write("**Flags**")
+
+                if result["acct"]["flags"]:
+                    for flag in result["acct"]["flags"]:
+                        st.warning(flag)
                 else:
-                    time.sleep(0.5)
-        prog.empty()
+                    st.success(
+                        "No threshold flags in the available data."
+                    )
+
+                st.write({
+                    "Cumulative CFO/PAT": result["acct"].get("cum_cfo_pat"),
+                    "Cumulative CFO/EBITDA": result["acct"].get("cum_cfo_ebitda"),
+                    "Accrual ratio (%)": result["acct"].get("accrual_ratio"),
+                    "Cash-flow observations": result["acct"].get("paired_pat_years"),
+                    "Forensic coverage complete": result["acct"].get("complete"),
+                    "CCC": result["acct"].get("ccc"),
+                    "CCC trend": result["acct"].get("ccc_trend"),
+                    "EBITDA margin trend": result["acct"].get("margin_trend"),
+                })
+
+            with t2:
+                st.write("**Annual ROE history (average equity denominator)**")
+
+                st.dataframe(
+                    pd.DataFrame(
+                        result["moat"]["roe_by_year"],
+                        columns=["Financial year", "ROE %"]
+                    ),
+                    hide_index=True,
+                    use_container_width=True
+                )
+
+                st.write({
+                    "ROE consistency": result["moat"]["consistency"],
+                    "Years above 15%": result["moat"]["years_above_15"],
+                    "Cyclical peak warning": result["cyc"]["peak"],
+                    "Prior-year average ROE": result["cyc"].get("average_prior"),
+                    "Historical median ROE": result["cyc"].get("median"),
+                })
+
+                st.info(
+                    "ROE consistency is only a quantitative moat proxy. Confirm the actual competitive advantage through qualitative research."
+                )
+
+            with t3:
+                mom = result["momentum"]
+
+                st.write({
+                    "Earnings momentum": mom.get("status"),
+                    "Latest quarterly EPS YoY (%)": mom.get("latest_yoy"),
+                    "Previous quarterly EPS YoY (%)": mom.get("prior_yoy"),
+                    "Momentum score": mom.get("score"),
+                })
+
+                if mom.get("eps_rows"):
+                    st.dataframe(
+                        pd.DataFrame(
+                            mom["eps_rows"],
+                            columns=["Quarter end", "EPS"]
+                        ),
+                        hide_index=True,
+                        use_container_width=True
+                    )
+
+                st.write("**Ownership**")
+
+                st.write({
+                    "Verified promoter holding (%)": result["holdings"].get("promoter_pct"),
+                    "Verified institutional holding (%)": result["holdings"].get("institutional_pct"),
+                    "Promoter pledge (% of promoter holding)": result["holdings"].get("promoter_pledge_pct"),
+                    "Yahoo insider holding (not promoter data) (%)": result["holdings"].get("yahoo_insider_pct"),
+                    "Ownership source": result["holdings"].get("source"),
+                    "Ownership as of": result["holdings"].get("as_of"),
+                })
+
+                for flag in result["holdings"].get("flags", []):
+                    st.warning(flag)
+
+            with t4:
+                st.write("**Data availability**")
+                st.json(result["data"]["debug"].get("data_years", {}))
+
+                st.write("**Data warnings**")
+                st.json(result["data"]["debug"].get("warnings", []))
+
+                st.write("**Metric sources**")
+
+                st.json({
+                    k: l1.get(k)
+                    for k in [
+                        "mcap_source",
+                        "de_source",
+                        "pe_source",
+                        "int_cov_source",
+                        "sales_source",
+                        "pat_source",
+                        "eps_source"
+                    ]
+                })
+
+            export = result_to_row(result)
+
+            dl1, dl2 = st.columns(2)
+
+            with dl1:
+                st.download_button(
+                    "Download analysis row (CSV)",
+                    pd.DataFrame([export]).to_csv(index=False),
+                    file_name=f"{ticker.replace('.', '_')}_high_compounder_v21.csv",
+                    mime="text/csv",
+                )
+
+            with dl2:
+                st.download_button(
+                    "Download printable scorecard (HTML)",
+                    build_scorecard_html(result),
+                    file_name=f"{ticker.replace('.', '_')}_scorecard_v21.html",
+                    mime="text/html",
+                )
+
+
+# =============================================================================
+# COMPARE PAGE
+# =============================================================================
+elif page == "Compare":
+
+    st.subheader("Compare companies")
+
+    c1, c2, c3 = st.columns(3)
+
+    symbols = [
+        c1.text_input("Stock 1", "LUPIN"),
+        c2.text_input("Stock 2", "INFY"),
+        c3.text_input("Stock 3 (optional)", ""),
+    ]
+
+    if st.button("Compare", type="primary"):
+
+        results = []
+
+        for symbol in symbols:
+            if not symbol.strip():
+                continue
+
+            with st.spinner(f"Analysing {symbol}..."):
+                item = analyse_stock(
+                    clean_ticker(symbol),
+                    ownership_overrides
+                )
+
+            if item and not item.get("excluded"):
+                results.append(item)
+
+            elif item and item.get("excluded"):
+                st.warning(
+                    f"{symbol}: excluded as a financial company."
+                )
+
+            else:
+                st.warning(f"Could not analyse {symbol}.")
+
+        if len(results) >= 2:
+
+            frame = pd.DataFrame([
+                result_to_row(r)
+                for r in results
+            ])
+
+            columns = [
+                "ticker", "sector", "tier", "composite", "score",
+                "pe", "peg", "roe", "roce", "de",
+                "sales_cagr", "pat_cagr", "cfo_pat", "moat_pct",
+                "earnings_momentum_score", "fcf_yield"
+            ]
+
+            st.dataframe(
+                frame[[c for c in columns if c in frame.columns]],
+                hide_index=True,
+                use_container_width=True
+            )
+
+            for r in results:
+                with st.expander(
+                    f"{r['l1']['name']} · {r['tier']} {r['size']}"
+                ):
+                    st.write(build_verdict(r))
+
+        else:
+            st.error(
+                "At least two valid non-financial companies are required."
+            )
+
+
+# =============================================================================
+# AUTO TOP 10 PAGE
+# =============================================================================
+elif page == "Auto Top 10":
+
+    st.subheader("Nifty 500 screening and ranked shortlist")
+
+    st.caption(
+        "Upload the latest official constituent CSV if the live Nifty 500 download is unavailable."
+    )
+
+    left, right = st.columns(2)
+
+    max_stocks = left.slider(
+        "Number of constituents to screen (500 = full universe)",
+        20, 500, 500, 10
+    )
+
+    top_n = right.slider(
+        "Number of shortlist companies",
+        5, 30, 10
+    )
+
+    sector_cap = st.checkbox(
+        "Apply 30% sector allocation cap",
+        value=True
+    )
+
+    if st.button(
+        "Run Nifty 500 screen",
+        type="primary",
+        use_container_width=True
+    ):
+
+        try:
+            tickers, universe_source = get_universe_tickers(
+                max_stocks,
+                universe_upload
+            )
+
+        except Exception as exc:
+            st.error(str(exc))
+            st.stop()
+
+        st.caption(
+            f"Universe source: {universe_source} · {len(tickers)} tickers loaded"
+        )
+
+        funnel = {
+            k: 0 for k in [
+                "total",
+                "financial",
+                "mcap",
+                "debt",
+                "roe",
+                "roce",
+                "growth",
+                "data",
+                "fetch_fail",
+                "pass"
+            ]
+        }
+
+        funnel["total"] = len(tickers)
+
+        results = []
+
+        progress = st.progress(0)
+        status = st.empty()
+
+        for index, ticker in enumerate(tickers, start=1):
+
+            status.caption(
+                f"Screening {ticker} ({index}/{len(tickers)})"
+            )
+
+            result, reason = analyse_for_funnel(
+                ticker,
+                ownership_overrides
+            )
+
+            funnel[reason] = funnel.get(reason, 0) + 1
+
+            if result:
+                results.append(result_to_row(result))
+
+            progress.progress(index / max(1, len(tickers)))
+
+            if index % 10 == 0:
+                time.sleep(0.5)
+
+        progress.empty()
+        status.empty()
+
         st.markdown("### Screening funnel")
-        total = funnel['total']; passed = funnel['pass']; failed_fetch = funnel.get('fetch_fail', 0)
-        if failed_fetch > total * 0.2:
-            st.warning(f"⚠ {failed_fetch} stocks failed to fetch — Yahoo Finance may be rate-limiting. Try fewer stocks or run again later.")
-        running = total
-        for label, key in [('Universe', None), ('Excl. banking', 'banking'), ('MCap > Rs 15,000 Cr', 'mcap'), ('D/E < 0.5', 'debt'), ('ROE > 15%', 'roe'), ('ROCE > 18%', 'roce'), ('Growth filter', 'growth')]:
-            if key:
-                running -= funnel.get(key, 0)
-            pct = running / total * 100 if total > 0 else 0
-            st.markdown(f'<div style="display:flex;align-items:center;gap:10px;margin:4px 0;"><div style="width:140px;font-size:12px;color:#6B7280;">{label}</div><div style="height:24px;background:{NAVY};border-radius:4px;display:flex;align-items:center;padding:0 8px;color:white;font-size:11px;font-weight:500;width:{max(pct, 3)}%;">{running}</div></div>', unsafe_allow_html=True)
-        st.markdown(f"**{passed} of {total} passed** ({round(passed / total * 100, 1) if total > 0 else 0}% pass rate) | {failed_fetch} fetch failures")
+
+        st.write(
+            f"Universe: **{funnel['total']}** · "
+            f"Financial companies: **{funnel['financial']}** · "
+            f"Passed all hard filters and data checks: **{funnel['pass']}** · "
+            f"Fetch failures: **{funnel['fetch_fail']}**"
+        )
+
+        funnel_rows = [
+            ("Financial exclusion", funnel["financial"]),
+            ("Market cap", funnel["mcap"]),
+            ("Debt / equity", funnel["debt"]),
+            ("ROE", funnel["roe"]),
+            ("ROCE", funnel["roce"]),
+            ("Growth", funnel["growth"]),
+            ("Insufficient data", funnel["data"]),
+            ("Fetch failure", funnel["fetch_fail"]),
+        ]
+
+        st.dataframe(
+            pd.DataFrame(
+                funnel_rows,
+                columns=["Elimination reason", "Companies"]
+            ),
+            hide_index=True,
+            use_container_width=True
+        )
+
+        if funnel["fetch_fail"] > funnel["total"] * 0.2:
+            st.warning(
+                "More than 20% of the universe failed to fetch. "
+                "Treat this screening run as incomplete and repeat after checking data access."
+            )
+
         if not results:
-            st.error("No stocks passed all filters."); st.stop()
-        st.markdown("---")
+            st.error(
+                "No stocks passed all fundamental filters and data requirements."
+            )
+            st.stop()
+
         df = pd.DataFrame(results)
-        peg_s = lambda x: (90 if x < 0.5 else 75 if x < 1 else 55 if x < 1.5 else 30 if x < 2 else 10) if is_valid(x) else 10
-        mom_s = lambda x: (80 if x > 30 else 65 if x > 0 else 40 if x > -20 else 20) if is_valid(x) else 40
-        cfo_s = lambda x: (100 if x > 1.2 else 85 if x > .9 else 65 if x > .7 else 40) if is_valid(x) else 20
-        df['rank'] = (df['score'].fillna(0) * .20 + df['peg'].apply(peg_s) * .25 +
-                      df['roe'].fillna(0) * .10 + df['ret'].apply(mom_s) * .15 +
-                      df['cum_cfo'].apply(cfo_s) * .15 + df['moat'] * .15)
-        df = df.sort_values('rank', ascending=False).head(tn)
-        df = df[df['tier'] != 'WATCH'] 
+        df = df[df["tier"] != "WATCH"].copy()
+        df = df.sort_values("composite", ascending=False)
 
-        # Apply sector cap
-        if sector_cap_on:
-            capped = apply_sector_cap(df.to_dict('records'), 30)
-            df = pd.DataFrame(capped)
+        selected = (
+            select_with_sector_limit(df, top_n, 30.0)
+            if sector_cap
+            else df.head(top_n)
+        )
 
-        # CSV export
-        export_cols = ['ticker','name','sector','price','pe','peg','roe','roce','score','tier','size',
-                       'sc','pc','cum_cfo','moat','fcf_yield','ret','int_cov','insider_pct','accrual_ratio','net_debt_cr']
-        export_df = df[[c for c in export_cols if c in df.columns]].copy()
-        rename_map = {'ticker':'Ticker','name':'Name','sector':'Sector','price':'Price','pe':'PE','peg':'PEG',
-                      'roe':'ROE%','roce':'ROCE%','score':'Score','tier':'Tier','size':'Size',
-                      'sc':'Sales CAGR%','pc':'PAT CAGR%','cum_cfo':'CFO/PAT','moat':'Moat%',
-                      'fcf_yield':'FCF Yield%','ret':'1Y Ret%','int_cov':'Int Coverage',
-                      'insider_pct':'Insider%','accrual_ratio':'Accrual%','net_debt_cr':'Net Debt Cr'}
-        export_df.columns = [rename_map.get(c, c) for c in export_df.columns]
-        st.download_button("Download results (CSV)", export_df.to_csv(index=False), f"top_{tn}_{datetime.now().strftime('%d%b%Y')}.csv", "text/csv")
+        if sector_cap and not selected.empty:
+            weights = selected["tier"].map(TIER_MIDPOINT).fillna(0)
+            total_weight = weights.sum()
 
-        for idx, row in df.iterrows():
-            rk = list(df.index).index(idx) + 1
-            ic = {"FULL": "🟢", "STANDARD": "🔵", "HALF": "🟡", "WATCH": "🔴"}.get(row['tier'], "⚪")
-            with st.expander(f"#{rk} {row['ticker']} — {ic} {row['tier']} | Score {row['score']} | PEG {fmt(row['peg'], '.2f')}", expanded=rk <= 3):
-                c1, c2, c3, c4, c5, c6 = st.columns(6)
-                c1.metric("ROE", fmt(row.get('roe'), '.1f', '%'))
-                c2.metric("PE", fmt(row.get('pe'), '.1f'))
-                c3.metric("FCF Yield", fmt(row.get('fcf_yield'), '.1f', '%'))
-                c4.metric("Moat", f"{row.get('moat', 0)}%")
-                c5.metric("Int Cov", fmt(row.get('int_cov'), '.1f', 'x') if is_valid(row.get('int_cov')) else 'N/A')
-                c6.metric("Insider", fmt(row.get('insider_pct'), '.0f', '%') if is_valid(row.get('insider_pct')) else 'N/A')
-                nd = row.get('net_debt_cr')
-                nd_str = f" | Net {'cash' if nd and nd < 0 else 'debt'} Rs {abs(nd):,.0f}Cr" if is_valid(nd) else ""
-                ar_str = f" | Accrual {row.get('accrual_ratio', '-')}%" if is_valid(row.get('accrual_ratio')) else ""
-                st.markdown(f"**{row['sector']}** | Sales {fmt(row.get('sc'), '.1f')}% | PAT {fmt(row.get('pc'), '.1f')}%{nd_str}{ar_str} | **{row['tier']} {row['size']}**")
+            if total_weight > 0:
+                max_sector_share = (
+                    weights.groupby(selected["sector"]).sum()
+                    / total_weight * 100
+                ).max()
 
-# ============================
-# PAGE: HOW IT WORKS
-# ============================
-elif page == "How It Works":
-    st.subheader("Framework architecture — v2")
+                if max_sector_share > 30.0:
+                    st.warning(
+                        f"The 30% sector allocation cap could not be fully met with the available qualifying candidates. Highest sector share is {max_sector_share:.1f}%."
+                    )
+
+        if selected.empty:
+            st.warning(
+                "All qualifying candidates were removed by the WATCH rule. Review the data and allocation rules."
+            )
+            st.stop()
+
+        st.markdown("### Ranked shortlist")
+
+        display_cols = [
+            "ticker", "name", "sector", "tier", "size", "composite",
+            "score", "pe", "peg", "roe", "roce", "de",
+            "sales_cagr", "pat_cagr", "cfo_pat", "moat_pct",
+            "earnings_momentum_score", "fcf_yield",
+            "interest_coverage", "promoter_pct"
+        ]
+
+        st.dataframe(
+            selected[[c for c in display_cols if c in selected.columns]],
+            hide_index=True,
+            use_container_width=True
+        )
+
+        total_midpoint = selected["tier"].map(TIER_MIDPOINT).sum()
+
+        if total_midpoint > 100:
+            st.warning(
+                f"The sum of suggested midpoint weights is {total_midpoint:.1f}% — above 100%. These are individual tier ranges, not a portfolio budget. Apply a separate portfolio-level sizing constraint."
+            )
+        else:
+            st.info(
+                f"Sum of suggested midpoint weights: {total_midpoint:.1f}%. This is not a portfolio optimisation result."
+            )
+
+        csv_columns = [
+            c for c in display_cols + [
+                "eps_growth",
+                "cfo_ebitda",
+                "accrual_pct",
+                "promoter_pledge_pct",
+                "return_1y",
+                "tier_reason"
+            ]
+            if c in selected.columns
+        ]
+
+        st.download_button(
+            "Download shortlist (CSV)",
+            selected[csv_columns].to_csv(index=False),
+            file_name=f"high_compounder_v21_top_{len(selected)}_{datetime.now():%d%b%Y}.csv",
+            mime="text/csv",
+        )
+
+
+# =============================================================================
+# HOW IT WORKS PAGE
+# =============================================================================
+else:
+
+    st.subheader("High Compounder Framework v2.1 — methodology")
+
     st.markdown("""
-**Layer 1 — Quantitative screen:** MCap > Rs 15,000 Cr, ROE > 15%, ROCE > 18%, D/E < 0.5, Sales & PAT CAGR > 15%. Mature compounders (MCap > Rs 50,000 Cr + ROE > 25%) get a relaxed 10% growth floor.
+### Stage 1 — Universe and exclusions
+Start with the current Nifty 500 constituent list. Exclude banks, NBFCs, insurers, lenders and other credit-intermediation businesses because these require a different set of ratios. A broad "Financial Services" sector label alone is not sufficient to exclude a company: exchanges and market-infrastructure businesses may have operating economics that can be screened separately. Upload the official constituent CSV if the live download is unavailable; the app deliberately does not silently substitute an old hardcoded list.
 
-**Layer 2 — Interest coverage** *(new):* EBIT / Interest Expense. Below 3x = reject. Completes the debt picture that D/E alone misses — a company can have low D/E but still struggle to service interest if operating profits are thin.
+### Stage 2 — Fundamental quality screen
+- Market capitalisation: at least ₹15,000 crore.
+- ROE: above 15%, calculated using average shareholder equity where available.
+- ROCE: above 18%, calculated using average capital employed where available.
+- Gross debt/equity: below 1.00x, calculated from statement debt and equity. Missing debt is N/A, not zero.
+- Revenue CAGR and PAT CAGR: both above 15%; mature compounder exception applies at market cap above ₹50,000 crore and ROE above 25%, reducing the threshold to 10%.
 
-**Layer 3 — Forensic accounting:** Five checks — receivables trend, inventory bloat, cumulative CFO/PAT, cumulative CFO/EBITDA, and **accrual ratio** *(new)*. Accrual ratio catches earnings manipulation relative to asset size — the earliest warning before cash flow deterioration becomes visible.
+Annual multi-year CAGR is preferred. A quarterly TTM year-on-year proxy is used only when eight complete quarterly observations exist and is labelled as a one-year proxy, not a multi-year CAGR.
 
-**Layer 4 — Cash Conversion Cycle:** Days Receivable + Days Inventory - Days Payable. Payables stress detection flags companies stretching suppliers when cash conversion is weak.
+### Stage 3 — Debt servicing
+Interest coverage is EBIT divided by gross interest expense. Net interest income is not substituted for gross interest expense. Below 3x caps the allocation at HALF. Missing data is shown as unavailable and requires verification.
 
-**Layer 5 — Moat durability** *(enhanced):* Uses annual ROE history plus **quarterly rolling ROE reconstruction** for longer lookback. If quarterly data reveals periods below 12% ROE hidden within annual averages, established moat gets downgraded to emerging.
+### Stage 4 — Forensic accounting
+Review receivables, inventory, cumulative CFO/PAT, cumulative CFO/EBITDA and the accrual ratio. Cumulative cash-flow ratios require at least three paired annual observations. The cash-conversion-related deductions are capped at 50 points to reduce repeated penalties for overlapping symptoms; the final forensic score is floored at zero.
 
-**Layer 6 — Promoter / Holdings** *(new — leading indicator):* Insider/promoter holding %, institutional ownership %. Flags very low promoter holding (<20%), excessive concentration (>75%), and negligible institutional oversight (<5%). Caps tier at STANDARD for high-risk ownership structures.
+### Stage 5 — Working capital
+Cash conversion cycle uses average receivables, inventory and payables balances. DSO uses revenue; DIO and DPO use cost of revenue. Missing inputs are not treated as zero.
 
-**Layer 7 — Dual valuation:** PEG with turnaround adjustment + FCF Yield + Adani filter (PE > 80).
+### Stage 6 — ROE consistency and moat research
+Historical ROE consistency is a quantitative proxy, not proof of a moat. An established moat proxy requires at least five years of ROE above 15%. Qualitative research into pricing power, brand, switching costs, distribution, technology and customer retention remains necessary.
 
-**Layer 8 — Earnings momentum:** QoQ EPS changes for last 2 quarters.
+### Stage 7 — Ownership and governance
+Yahoo insider ownership is displayed only as an informational signal; it is not treated as Indian promoter holding. Verified promoter, institutional and pledge data can be supplied through a CSV with columns `ticker`, `promoter_pct`, `institutional_pct`, `promoter_pledge_pct`, `as_of`, and `source`. Pledge disclosures trigger manual review rather than an invented automatic penalty.
 
-**Layer 9 — Cyclical ROE:** Peak detection when latest ROE > 2x average and above 20%.
+### Stage 8 — Valuation
+PEG uses diluted EPS growth rather than total PAT growth. The growth rate is adjusted to revenue growth when diluted EPS growth is more than twice revenue growth. FCF yield is calculated only when both CFO and capex are available. P/E above 80x is flagged but is not automatically treated as an exclusion.
 
-**Layer 10 — Position sizing v4:** Quality + moat + valuation + momentum + **holdings** + **interest coverage** -> FULL/STANDARD/HALF/WATCH. Interest coverage below 3x forces HALF. Weak ownership structure caps at STANDARD.
+### Stage 9 — Earnings momentum and cyclicality
+Quarterly EPS momentum compares each of the latest two quarters with the same quarter one year earlier, reducing seasonal distortion. Loss-to-profit transitions are labelled rather than converted into misleading percentage growth. Cyclical ROE warnings require at least four annual observations and compare the latest ROE with the average of prior years.
 
-**Layer 11 — Sector cap** *(new):* In Auto Top 10, optional 30% sector concentration limit prevents correlated blowups.
+### Stage 10 — Allocation and ranking
+FULL requires strong forensic quality, no forensic flags, a qualifying moat proxy, no cyclical peak warning and PEG at or below 1.0. STANDARD and HALF are assigned through explicit score, flag and valuation rules. PEG above 3.0 and interest coverage below 3.0x cap the allocation at HALF; PEG above 5.0 or forensic score below 50 results in WATCH. A fundamental failure in single-stock review caps the tier at HALF; batch screening remains strict.
 
----
-**Leading indicators** (marked with ★): Promoter/institutional holdings, receivables trend, inventory bloat, CCC/payables stress, earnings momentum, accrual ratio.
+The composite score uses six normalised 0–100 inputs: PEG 25%, forensic score 20%, earnings momentum 15%, CFO quality 15%, ROE consistency 15%, and normalised ROE 10%. Share-price return is used only as a risk override, not as an earnings momentum score.
 
-**Lagging indicators:** ROE, ROCE, D/E, CAGR, cumulative cash conversion, moat consistency, PEG, FCF yield.
-
-**Bug fixes in v2:** D/E unit detection (percentage vs decimal), EPS momentum edge cases for negative earnings, adaptive rate limiting for 500-stock screens, expanded Nifty 500 ticker list with fallback chain.
+### Important limitations
+The framework has not been historically backtested. Yahoo Finance data can be missing, stale or inconsistently mapped. Sector-relative benchmarking, related-party transactions, management quality, full promoter pledge analysis and a complete sell discipline remain outside the automated model. Verify the data against annual reports and exchange disclosures before investing.
     """)
-    st.caption("Vinayak Nagral | September 2026")
+
+    st.caption(
+        "High Compounder Framework v2.1 · Quantitative research tool · Not investment advice"
+    )
