@@ -1,5 +1,5 @@
 """
-High Compounder Framework v2.3
+High Compounder Framework v2.4
 Author: Vinayak Nagral
 
 Streamlit screener for non-financial Indian listed companies.
@@ -27,13 +27,13 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ============================================================
 st.set_page_config(
-    page_title="High Compounder Framework v2.3",
+    page_title="High Compounder Framework v2.4",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-VERSION = "2.3"
+VERSION = "2.4"
 AUTHOR = "Vinayak Nagral"
 NAVY = "#1B2A4A"
 
@@ -331,21 +331,15 @@ def get_lease_liabilities(df, col=0):
 
 
 def get_gross_debt(df, col, leases):
-    """Gross borrowings excluding lease liabilities where they can be identified."""
-    for label in ("Total Debt", "Total Debt And Lease Obligations"):
-        total = safe_get(df, [label], col)
-        if valid(total) and total >= 0:
-            if valid(leases) and 0 < leases <= total:
-                return total - leases, f"{label} less lease liabilities"
-            return total, f"{label} (may include leases)"
+    """Prefer ex-lease borrowing lines; never subtract leases; never accept one partial line."""
     short = safe_get(df, SHORT_DEBT_LABELS, col)
     long_ = safe_get(df, LONG_DEBT_LABELS, col)
-    parts = [x for x in (short, long_) if valid(x) and x >= 0]
-    if len(parts) == 2:
-        return sum(parts), "Short-term + long-term borrowings"
-    if len(parts) == 1:
-        return parts[0], "Only one borrowing line reported (verify)"
-    return None, "No borrowing data reported"
+    if valid(short) and valid(long_) and short >= 0 and long_ >= 0:
+        return short + long_, "Short-term + long-term borrowings (ex-leases)"
+    total = safe_get(df, ["Total Debt"], col)
+    if valid(total) and total >= 0:
+        return total, "Reported Total Debt (may include leases)"
+    return None, "Borrowing data incomplete - verify manually"
 
 
 def get_equity_shares(bs, info):
@@ -475,12 +469,12 @@ def build_multi(fin, bs, cf):
         interest = get_interest_expense(fin, fcol)
         debt_assumed = False
 
-        # Debt-free assumption: no borrowing lines anywhere AND negligible interest.
+        # Debt-free assumption: no borrowing lines anywhere AND interest reported near zero.
         if debt is None and not field_exists(bs, ALL_DEBT_LABELS):
             negligible = (
-                not valid(interest)
-                or interest == 0
-                or (valid(ebit) and ebit > 0 and interest / ebit * 100 < NEGLIGIBLE_INTEREST_PCT)
+                valid(interest)
+                and (interest == 0
+                     or (valid(ebit) and ebit > 0 and interest / ebit * 100 < NEGLIGIBLE_INTEREST_PCT))
             )
             if negligible:
                 debt = 0.0
@@ -608,6 +602,7 @@ def get_market_cap(data, price):
 
 
 def get_pe(data, price):
+    """Trailing P/E only - forward P/E is not mixed with historical growth."""
     qfin = data.get("qfin")
     getter = eps_getter(qfin)
     if getter is not None and valid(price):
@@ -616,13 +611,9 @@ def get_pe(data, price):
             eps = [getter(qfin, c) for _, c in cols[:4]]
             if all(valid(x) for x in eps) and sum(eps) > 0:
                 return round(price / sum(eps), 2), "Price / TTM EPS"
-    info = data["info"]
-    trailing = number(info.get("trailingPE"))
+    trailing = number(data["info"].get("trailingPE"))
     if valid(trailing) and trailing > 0:
         return round(trailing, 2), "Yahoo trailing P/E (fallback)"
-    forward = number(info.get("forwardPE"))
-    if valid(forward) and forward > 0:
-        return round(forward, 2), "Yahoo forward P/E (fallback)"
     return None, "Not available"
 
 
@@ -1379,9 +1370,12 @@ def gen_layers(r):
         L.append(("Interest coverage", "warn", l1["int_cov_source"]))
 
     s = a.get("score")
-    st_f = "warn" if s is None else "pass" if s >= 85 else "warn" if s >= 50 else "fail"
+    provisional = not a.get("complete")
+    st_f = ("warn" if s is None else "fail" if s < 50 else "warn" if provisional
+            else "pass" if s >= 85 else "warn")
     L.append(("Forensic accounting", st_f,
-              f"{fmt(s, '.0f')}/100, {a.get('num_flags', 0)} flags; CFO/PAT {fmt(a.get('cum_cfo_pat'), '.2f')}x, "
+              f"{fmt(s, '.0f')}/100{' (provisional - incomplete data)' if provisional else ''}, "
+              f"{a.get('num_flags', 0)} flags; CFO/PAT {fmt(a.get('cum_cfo_pat'), '.2f')}x, "
               f"CFO/EBITDA {fmt(a.get('cum_cfo_ebitda'), '.2f')}x, accrual {fmt(a.get('accrual_ratio'))}%"))
 
     ccc = a.get("ccc")
@@ -1610,7 +1604,7 @@ def gen_scorecard(r):
 <div><div style="font-size:22px;font-weight:bold;color:{NAVY};">{esc(str(l1['name']))}</div>
 <div style="font-size:10px;color:#888;margin-top:3px;">{esc(r['ticker'])} | {esc(str(l1['sector']))} | Rs {fmt(l1['price'], ',.2f')} | CMP as of {now:%d %b %Y, %I:%M %p}</div></div>
 <div style="text-align:right;"><div style="background:{tier_bg};color:white;padding:5px 16px;border-radius:14px;font-size:12px;font-weight:bold;display:inline-block;">{r['tier']} {r['size']}</div>
-<div style="font-size:9px;color:#888;margin-top:4px;">Forensic {fmt(a.get('score'), '.0f')}/100</div></div></div>
+<div style="font-size:9px;color:#888;margin-top:4px;">Forensic {fmt(a.get('score'), '.0f')}/100{' (provisional)' if not a.get('complete') else ''}</div></div></div>
 <table style="border-bottom:1px solid #ddd;"><tr>{met_html}</tr></table>
 <div style="display:flex;border-bottom:1px solid #ddd;">
 <div style="flex:1;padding:12px 20px;border-right:1px solid #ddd;"><div style="font-size:10px;font-weight:bold;color:{NAVY};margin-bottom:8px;">LAYER RESULTS</div><table>{layer_html}</table></div>
@@ -1865,6 +1859,8 @@ if page == "Single Stock":
                 s = a.get("score")
                 css = "score-green" if valid(s) and s >= 85 else "score-yellow" if valid(s) and s >= 50 else "score-red"
                 st.markdown(f'<div class="score-box {css}"><h2>{fmt(s, ".0f")}/100</h2></div>', unsafe_allow_html=True)
+                if not a.get("complete"):
+                    st.caption("Provisional score: some multi-year cash-flow data is missing.")
                 k1, k2, k3 = st.columns(3)
                 k1.metric("Cumulative CFO/PAT", fmt(a.get("cum_cfo_pat"), ".2f", "x"))
                 k2.metric("Cumulative CFO/EBITDA", fmt(a.get("cum_cfo_ebitda"), ".2f", "x"))
@@ -2079,9 +2075,9 @@ else:
 
 **2. Hard filters.** Market cap at least Rs 15,000 Cr, ROE above 15%, ROCE above 18% (both on average capital), gross D/E below 1.0x, sales and PAT CAGR above 15% (10% for companies above Rs 50,000 Cr with ROE above 25%). Auto Top 10 requires all five. In single-stock view, one failure caps the tier at HALF and two or more give WATCH.
 
-**3. Debt.** Gross borrowings from the balance sheet, with lease liabilities removed where Yahoo reports them separately. If Yahoo shows no borrowing lines at all and interest is negligible, the company is treated as debt-free and flagged for verification. Interest coverage below 3x caps at HALF.
+**3. Debt.** Gross borrowings = short-term + long-term borrowing lines (excluding leases) when both are reported; otherwise Yahoo's Total Debt (may include leases, so D/E may be slightly overstated). A single partial borrowing line is never accepted. A company is treated as debt-free only when Yahoo shows no borrowing lines at all AND interest expense is reported near zero; otherwise D/E is N/A and must be verified manually. Interest coverage below 3x caps at HALF.
 
-**4. Forensics (score starts at 100).** Receivables rising 3 years in a row (-15), material inventory growing 10+ points faster than revenue (-15), cumulative CFO/PAT (-20 / -30), cumulative CFO/EBITDA (-15 / -20), worsening CFO/EBITDA (-10), negative cumulative CFO (-25), accrual ratio (-10 / -20). Cash-flow deductions are capped at 50 and the score cannot go below 0.
+**4. Forensics (score starts at 100).** Receivables rising 3 years in a row (-15), material inventory growing 10+ points faster than revenue (-15), cumulative CFO/PAT (-20 / -30), cumulative CFO/EBITDA (-15 / -20), worsening CFO/EBITDA (-10), negative cumulative CFO (-25), accrual ratio (-10 / -20). Cash-flow deductions are capped at 50 and the score cannot go below 0. When multi-year cash-flow data is incomplete the score is marked provisional and FULL is blocked.
 
 **5. Working capital.** CCC = DSO + DIO - DPO on average balances (DSO on revenue, DIO/DPO on cost of revenue). DIO is excluded when inventory is immaterial; a warning shows when cost of revenue is under 10% of sales.
 
@@ -2089,7 +2085,7 @@ else:
 
 **7. Ownership (leading).** Upload verified promoter, institutional and pledge data. Promoter below 20% caps at STANDARD; pledge above 25% caps at STANDARD, 50%+ caps at HALF.
 
-**8. Valuation.** PEG = P/E / diluted EPS growth (sales growth used if EPS growth is more than twice sales growth). Negative EPS growth makes PEG not meaningful. FCF yield only when CFO and capex are both reported. P/E above 80 is a warning.
+**8. Valuation.** PEG = trailing P/E / diluted EPS growth (sales growth used if EPS growth is more than twice sales growth). Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield only when CFO and capex are both reported. P/E above 80 is a warning.
 
 **9. Momentum (leading).** EPS vs the same quarter last year for the latest two quarters; if only one comparison exists, it is scored alone.
 
