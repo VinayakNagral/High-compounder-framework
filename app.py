@@ -602,19 +602,36 @@ def get_market_cap(data, price):
 
 
 def get_pe(data, price):
-    """Trailing P/E only - forward P/E is not mixed with historical growth."""
-    qfin = data.get("qfin")
-    getter = eps_getter(qfin)
-    if getter is not None and valid(price):
-        cols = dated_columns(qfin)
-        if len(cols) >= 4:
-            eps = [getter(qfin, c) for _, c in cols[:4]]
-            if all(valid(x) for x in eps) and sum(eps) > 0:
-                return round(price / sum(eps), 2), "Price / TTM EPS"
-    trailing = number(data["info"].get("trailingPE"))
-    if valid(trailing) and trailing > 0:
-        return round(trailing, 2), "Yahoo trailing P/E (fallback)"
-    return None, "Not available"
+    """
+    Use Yahoo trailing P/E first.
+    Cross-check quarterly EPS to avoid incorrect calculations.
+    """
+    info = data.get("info", {})
+
+    # 1. Get provider-reported trailing P/E
+    reported_pe = number(info.get("trailingPE"))
+
+    # 2. Get provider-reported trailing EPS
+    reported_eps = number(info.get("trailingEps"))
+
+    # 3. Check whether reported P/E is available
+    if valid(reported_pe) and reported_pe > 0:
+
+        return round(reported_pe, 2), "Yahoo trailing P/E"
+
+    # 4. If P/E is unavailable, calculate using reported trailing EPS
+    if valid(price) and price > 0 and valid(reported_eps) and reported_eps > 0:
+
+        calculated_pe = price / reported_eps
+
+        return round(calculated_pe, 2), "Price / Yahoo trailing EPS"
+
+    # 5. If neither is available, do not trust unverified quarterly EPS
+    data.setdefault("debug", {}).setdefault("warnings", []).append(
+        "P/E unavailable. Verify quarterly EPS and currency manually."
+    )
+
+    return None, "Not available - manual verification required"
 
 
 # ============================================================
