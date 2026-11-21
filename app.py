@@ -2591,21 +2591,20 @@ elif page == "Auto Top 10":
             st.info(f"Suggested weights total {selected['portfolio_weight'].sum():.1f}%; "
                     f"cash {100 - selected['portfolio_weight'].sum():.1f}%.")
 
-         st.markdown("### Ranked shortlist")
-        show = ["ticker", "name", "sector", "tier", "portfolio_size_band", "portfolio_weight",
-                "allocation_adjustment", "composite", "coverage", "forensic",
-                "pe", "peg", "roe", "roce", "de", "sales_cagr", "pat_cagr", "eps_growth",
-                "cfo_pat_3y", "cfo_ebitda_3y", "cfo_pat_long_window", "cfo_ebitda_long_window",
-                "cash_conversion_trend",
-                "moat_pct", "momentum", "fcf_yield", "int_cov", "promoter_pct", "pledge_pct", "return_1y"]
-        st.dataframe(selected[show].round(2), hide_index=True, use_container_width=True)
-
-        export = selected[show + ["cfo_pat_5y", "cfo_ebitda_5y", "cfo_pat_prior2y",
-                                  "accrual_pct", "net_debt_cr", "reason"]]
-        st.download_button("Download shortlist (CSV)", export.to_csv(index=False),
-                           file_name=f"high_compounder_v{VERSION}_top{len(selected)}_{datetime.now():%d%b%Y}.csv",
-                           mime="text/csv")
-
+                st.markdown("### Ranked shortlist")
+                show = ["ticker", "name", "sector", "tier", "portfolio_size_band", "portfolio_weight",
+                        "allocation_adjustment", "composite", "coverage", "forensic",
+                        "pe", "peg", "roe", "roce", "de", "sales_cagr", "pat_cagr", "eps_growth",
+                        "cfo_pat_3y", "cfo_ebitda_3y", "cfo_pat_long_window", "cfo_ebitda_long_window",
+                        "cash_conversion_trend",
+                        "moat_pct", "momentum", "fcf_yield", "int_cov", "promoter_pct", "pledge_pct", "return_1y"]
+                st.dataframe(selected[show].round(2), hide_index=True, use_container_width=True)
+        
+                export = selected[show + ["cfo_pat_5y", "cfo_ebitda_5y", "cfo_pat_prior2y",
+                                          "accrual_pct", "net_debt_cr", "reason"]]
+                st.download_button("Download shortlist (CSV)", export.to_csv(index=False),
+                                   file_name=f"high_compounder_v{VERSION}_top{len(selected)}_{datetime.now():%d%b%Y}.csv",
+                                   mime="text/csv")
         st.markdown("### Company details")
         icons = {"FULL": "🟢", "STANDARD": "🔵", "HALF": "🟡", "WATCH": "🔴"}
         for rank, (_, row) in enumerate(selected.iterrows(), start=1):
