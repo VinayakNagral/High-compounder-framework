@@ -1182,7 +1182,7 @@ def run_forensic(records):
     cum_cfo_pat = recent3_cfo_pat
     cum_cfo_ebitda = recent3_cfo_ebitda
     cash_conversion_delta = None
-      cash_conversion_trend = (
+      cash_conversion_trend =(
         f"unavailable - no consecutive prior years (actual history: {long_window_label})"
     )
       if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
