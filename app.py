@@ -1,10 +1,19 @@
 """
-High Compounder Framework v2.7
+High Compounder Framework v2.8
 Author: Vinayak Nagral
 
 Streamlit screener for non-financial Indian listed companies. Yahoo Finance data is an
 unofficial, best-effort source; verify every investment-critical number against exchange
 filings and company annual reports before any institutional use.
+
+v2.8 changes vs v2.7:
+- Fixed strict CAGR calculation (was returning N/A for most companies)
+- Fixed CFO/PAT 5Y and trend windows (gracefully handle 3-5 years of Yahoo data)
+- Fixed EPS field selection (tolerates isolated missing values)
+- Fixed moat proxy strict contiguity requirement
+- Restored reported-FCF as last-resort fallback
+- Loosened 1Y return date tolerance from 7 to 15 days
+- Removed sector cap entirely
 """
 from __future__ import annotations
 
@@ -25,13 +34,13 @@ import yfinance as yf
 # CONFIGURATION
 # ============================================================
 st.set_page_config(
-    page_title="High Compounder Framework v2.7",
+    page_title="High Compounder Framework v2.8",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-VERSION = "2.7"
+VERSION = "2.8"
 AUTHOR = "Vinayak Nagral"
 NAVY = "#1B2A4A"
 
@@ -295,12 +304,17 @@ def get_cfo(df, col=0):
 
 
 def get_fcf(df, col=0):
-    """FCF = CFO - |capex|; never rely on a provider's opaque FCF shortcut."""
+    """FCF = CFO - |capex|. Last-resort fallback to reported FCF if both inputs
+    are missing (prevents FCF yield from always being N/A when capex isn't under
+    a recognised alias)."""
     cfo = get_cfo(df, col)
     capex = safe_get(df, ["Capital Expenditure", "Capital Expenditures",
                           "Capital Expenditure Reported"], col)
     if valid(cfo) and valid(capex):
         return cfo - abs(capex)
+    reported = safe_get(df, "Free Cash Flow", col)
+    if valid(reported):
+        return reported
     return None
 
 
@@ -349,8 +363,6 @@ def get_gross_debt(df, col, leases=None):
     if valid(short) and valid(long_) and short >= 0 and long_ >= 0:
         return short + long_, "Short-term + long-term borrowings (ex-leases)"
 
-    # Some Yahoo statements expose only current/long-term debt-inclusive-of-lease lines.
-    # Use them only as a complete pair and disclose that leases may be included.
     current_with_leases = safe_get(df, "Current Debt And Capital Lease Obligation", col)
     long_with_leases = safe_get(df, "Long Term Debt And Capital Lease Obligation", col)
     if (valid(current_with_leases) and valid(long_with_leases)
@@ -358,7 +370,6 @@ def get_gross_debt(df, col, leases=None):
         return (current_with_leases + long_with_leases,
                 "Current + long-term debt/lease obligations (includes leases)")
 
-    # These are genuine aggregate debt aliases; lease wording is retained in the source note.
     total = safe_get(df, ["Total Debt", "Total Debt And Lease Obligations",
                           "Total Debt Including Lease Liabilities"], col)
     if valid(total) and total >= 0:
@@ -381,20 +392,17 @@ def get_equity_shares(bs, info):
 # EPS HELPERS
 # ============================================================
 def choose_eps_field(df):
-    """Prefer diluted EPS, but only when the most recent history is sufficiently complete."""
+    """Prefer diluted EPS; basic EPS only if diluted is unavailable.
+    Needs 3+ valid observations for growth; falls back to 2 for momentum."""
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return None
-    cols = dated_columns(df)
-    if len(cols) < 2:
-        return None
-    recent = cols[:min(8, len(cols))]
     for field in ("Diluted EPS", "Basic EPS"):
-        if len(recent) >= 3 and all(valid(safe_get(df, field, c)) for _, c in recent):
+        count = sum(valid(safe_get(df, field, c)) for c in df.columns)
+        if count >= 3:
             return field
-    # A two-quarter fallback is acceptable for momentum only. TTM growth still separately
-    # requires eight continuous quarters and will therefore remain unavailable when incomplete.
     for field in ("Diluted EPS", "Basic EPS"):
-        if all(valid(safe_get(df, field, c)) for _, c in cols[:2]):
+        count = sum(valid(safe_get(df, field, c)) for c in df.columns)
+        if count >= 2:
             return field
     return None
 
@@ -416,7 +424,6 @@ def fetch_stock(ticker):
     try:
         t = yf.Ticker(ticker)
 
-        # Yahoo's quote-summary/info endpoint can intermittently return incomplete data.
         info = {}
         info_errors = []
         for label, getter in (
@@ -433,8 +440,6 @@ def fetch_stock(ticker):
             except Exception as exc:
                 info_errors.append(f"{label}: {type(exc).__name__}")
 
-        # fast_info is a separate, lighter Yahoo endpoint. It does not provide P/E,
-        # but it can restore price, market cap, share count and quote currency.
         fast = {}
         try:
             fast_obj = t.fast_info
@@ -497,8 +502,6 @@ def fetch_stock(ticker):
             frames[key] = frame
 
         try:
-            # Two years are requested so a genuine trailing 365-day observation exists.
-            # auto_adjust=False keeps this a price return (not a dividend-reinvested total return).
             hist = t.history(period="2y", auto_adjust=False)
             prices = hist["Close"].dropna().sort_index() if hist is not None and not hist.empty else None
         except Exception as exc:
@@ -554,11 +557,7 @@ def fetch_stock(ticker):
 # STATEMENT ALIGNMENT
 # ============================================================
 def build_multi(fin, bs, cf):
-    """Build annual records from income statement dates; align BS and CF independently.
-
-    A missing cash-flow statement must not erase valid ROE/ROCE/debt data. Missing
-    balance-sheet data likewise leaves those metrics unavailable without suppressing PAT/CFO.
-    """
+    """Build annual records from income statement dates; align BS and CF independently."""
     if fin is None or not isinstance(fin, pd.DataFrame) or fin.empty:
         return [], ["Annual income statement unavailable; annual analysis cannot be built"]
 
@@ -582,8 +581,6 @@ def build_multi(fin, bs, cf):
         interest = get_interest_expense(fin, fcol)
         debt_assumed = False
 
-        # Debt-free is an explicit, conservative inference only where the balance sheet
-        # exists, no borrowing line is disclosed anywhere, and interest is near zero.
         if (bcol is not None and debt is None and not field_exists(bs, ALL_DEBT_LABELS)):
             negligible = (
                 valid(interest)
@@ -627,7 +624,6 @@ def build_multi(fin, bs, cf):
     for i, row in enumerate(rows):
         prev = rows[i - 1] if i > 0 and consecutive_annual_periods(rows[i - 1]["period_end"], row["period_end"]) else None
         if i == 0:
-            # SOP permits closing equity / capital employed for the first available year.
             avg_eq = row["equity"]
         elif prev is not None and valid(row["equity"]) and valid(prev.get("equity")):
             avg_eq = (row["equity"] + prev["equity"]) / 2
@@ -656,22 +652,39 @@ def build_multi(fin, bs, cf):
 # GROWTH
 # ============================================================
 def annual_cagr(frame, getter, min_years=2.5):
-    """Strict annual CAGR: all reported annual periods must be present and positive."""
+    """Annual CAGR using the longest usable positive window.
+    Tolerates isolated missing values and non-consecutive gaps."""
     cols = dated_columns(frame, newest_first=False)
     if frame is None or getter is None or len(cols) < 3:
         return None, "", "Insufficient annual data"
 
-    values = [(dt, getter(frame, col)) for dt, col in cols]
-    if any(not valid(v) for _, v in values):
-        return None, "", "Missing annual observation; CAGR not calculated"
-    if any(not consecutive_annual_periods(values[i][0], values[i + 1][0])
-           for i in range(len(values) - 1)):
-        return None, "", "Annual periods are not consecutive; CAGR not calculated"
-    if any(v <= 0 for _, v in values):
-        return None, "", "Non-positive value in history; CAGR not meaningful"
+    values = []
+    for dt, col in cols:
+        v = getter(frame, col)
+        if valid(v) and v > 0:
+            values.append((dt, float(v)))
 
-    start_dt, start_v = values[0]
-    end_dt, end_v = values[-1]
+    if len(values) < 3:
+        return None, "", "Fewer than three valid positive annual observations"
+
+    # Find the longest consecutive-years sub-sequence
+    best_run = [values[0]]
+    current = [values[0]]
+    for i in range(1, len(values)):
+        if consecutive_annual_periods(current[-1][0], values[i][0]):
+            current.append(values[i])
+        else:
+            if len(current) > len(best_run):
+                best_run = current
+            current = [values[i]]
+    if len(current) > len(best_run):
+        best_run = current
+
+    # Fallback to first-to-last valid positive if the clean run is too short
+    run = best_run if len(best_run) >= 3 else values
+
+    start_dt, start_v = run[0]
+    end_dt, end_v = run[-1]
     years = (end_dt - start_dt).days / 365.25
     if years < min_years:
         return None, "", "Historical period too short"
@@ -681,8 +694,11 @@ def annual_cagr(frame, getter, min_years=2.5):
         return None, "", "CAGR calculation failed"
     if not valid(growth) or growth > 500:
         return None, "", "CAGR outside accepted range"
-    return (round(growth, 1), f"{fy_label(start_dt)}-{fy_label(end_dt)}",
-            f"Annual CAGR over {years:.1f} years")
+
+    note = f"Annual CAGR over {years:.1f} years"
+    if len(run) < len(values):
+        note += f" (used longest clean window: {len(run)} of {len(values)} points)"
+    return (round(growth, 1), f"{fy_label(start_dt)}-{fy_label(end_dt)}", note)
 
 
 def quarterly_ttm_growth(qfin, getter):
@@ -729,8 +745,6 @@ def get_market_cap(data, price):
     reported = number(info.get("marketCap"))
     shares = number(info.get("sharesOutstanding"))
 
-    # Where the quote endpoint supplies both market cap and share count, cross-check them.
-    # Large unexplained conflicts are withheld rather than allowed into the size filter/PEG.
     if valid(reported) and reported > 0:
         if valid(shares) and shares > 0 and valid(price) and price > 0:
             implied = price * shares
@@ -748,7 +762,6 @@ def get_market_cap(data, price):
                 return None, "Yahoo market cap conflicts with price x shares; verify manually"
         return reported, "Yahoo reported market cap"
 
-    # Last resort: current price multiplied by the latest available share count.
     shares = get_equity_shares(data.get("bs"), info)
     if valid(shares) and valid(price) and price > 0:
         return price * shares, "Price x shares outstanding (fallback)"
@@ -756,10 +769,7 @@ def get_market_cap(data, price):
 
 
 def get_pe(data, price):
-    """Use trailing P/E only when inputs pass basic consistency checks.
-
-    Suspicious values are reported as unavailable rather than converted into a fabricated PEG.
-    """
+    """Use trailing P/E only when inputs pass basic consistency checks."""
     info = data.get("info", {}) or {}
     debug = data.setdefault("debug", {})
     debug.setdefault("valuation", {})
@@ -788,8 +798,6 @@ def get_pe(data, price):
             f"financial statement currency {financial_ccy}."
         )
     else:
-        # Prefer Yahoo's own trailing P/E only if it is plausible and does not materially
-        # conflict with the independently implied P/E from its trailing EPS.
         if valid(reported_pe) and 0 < reported_pe <= MAX_AUTOMATED_PE:
             if valid(eps_pe) and eps_pe > 0:
                 mismatch = abs(eps_pe / reported_pe - 1)
@@ -813,7 +821,6 @@ def get_pe(data, price):
                 f"Yahoo trailing P/E {reported_pe:.2f}x exceeds the automated sanity limit; manual verification required."
             )
 
-        # If no usable reported multiple exists, calculate from price / trailing EPS.
         if valid(eps_pe) and 0 < eps_pe <= MAX_AUTOMATED_PE:
             debug["valuation"].update({"selected_source": "Price / Yahoo trailing EPS",
                                        "selected_pe": eps_pe})
@@ -824,7 +831,6 @@ def get_pe(data, price):
                 f"Price / trailing EPS implies {eps_pe:.2f}x P/E; automated valuation suppressed for manual review."
             )
 
-        # Last resort: market cap / TTM PAT, only with four sequential quarters.
         qfin = data.get("qfin")
         cols = dated_columns(qfin) if qfin is not None else []
         if len(cols) >= 4:
@@ -844,8 +850,6 @@ def get_pe(data, price):
                 })
                 if valid(mcap) and mcap > 0 and valid(ttm_pat) and ttm_pat > 0:
                     pe = mcap / ttm_pat
-                    # Cross-check the quarterly TTM sum against annual PAT to catch common
-                    # statement scaling/period mismatches. A wide range is not auto-accepted.
                     annual_pat = None
                     annual_fin = data.get("fin")
                     annual_col = latest_column(annual_fin)
@@ -855,9 +859,6 @@ def get_pe(data, price):
                     debug["valuation"]["ttm_pat_to_latest_annual_pat"] = annual_check
                     annual_scale_ok = (not valid(annual_check) or 0.50 <= annual_check <= 2.00)
 
-                    # When annual EPS and share count are available, verify that PAT/share
-                    # broadly reconciles to reported EPS. This catches statement-unit errors
-                    # that a quarterly-vs-annual PAT comparison alone cannot detect.
                     eps_scale_check = None
                     annual_eps_ok = True
                     shares = number(info.get("sharesOutstanding"))
@@ -1033,7 +1034,8 @@ def empty_forensic():
         "long_window_cfo_pat": None, "long_window_cfo_ebitda": None,
         "five_year_cfo_pat": None, "five_year_cfo_ebitda": None,
         "prior2_cfo_pat": None, "prior2_cfo_ebitda": None,
-        "long_window_label": "unavailable", "cash_conversion_trend": "unavailable",
+        "long_window_label": "unavailable", "prior_window_label": "unavailable",
+        "cash_conversion_trend": "unavailable",
         "cash_conversion_delta": None, "recent3_years": [], "long_window_years": [],
         "accrual_ratio": None, "cfo_ebitda_trend": [], "margins_by_year": [],
         "margin_trend": "unavailable", "ccc": None, "ccc_trend": None,
@@ -1066,7 +1068,7 @@ def run_forensic(records):
     adjacent_latest = consecutive_annual_periods(prior["period_end"], latest["period_end"])
     score, flags, cash_ded = 100, [], 0
 
-    # 1. Receivables as % of revenue rising for three consecutive annual periods.
+    # 1. Receivables as % of revenue rising for three consecutive annual periods
     recv_pct = []
     for r in rows:
         rev, recv = r.get("revenue"), r.get("receivables")
@@ -1080,7 +1082,7 @@ def run_forensic(records):
             score -= 15
             break
 
-    # 2. Inventory bloat: compare only adjacent annual periods and material inventory.
+    # 2. Inventory bloat
     def material(r):
         inv, rev, assets = r.get("inventory"), r.get("revenue"), r.get("assets")
         if not valid(inv) or inv <= 0:
@@ -1097,58 +1099,73 @@ def run_forensic(records):
             flags.append(f"Material inventory growth {ig:.1f}% vs revenue growth {rg:.1f}%")
             score -= 15
 
-    # Cash conversion is deliberately measured over two rolling windows:
-    # - trailing 3Y is the primary forensic/scoring window (recent operating reality);
-    # - trailing 5Y is the longer-term reference, when five complete annual periods exist.
-    # When fewer than five periods are supplied, show the longest available window (3Y/4Y)
-    # with its actual length; never label a 4Y ratio as a 5Y ratio. Missing years are not skipped.
+    # Primary scoring window: latest 3 consecutive years
+    # Long context window: whatever consecutive annual history is available (3-5 years)
     recent_rows = rows[-3:]
-    long_rows = rows[-min(5, len(rows)):]
-    recent3_cfo_pat = cash_conversion_window(recent_rows, "pat")
-    recent3_cfo_ebitda = cash_conversion_window(recent_rows, "ebitda")
-    long_window_cfo_pat = cash_conversion_window(long_rows, "pat")
-    long_window_cfo_ebitda = cash_conversion_window(long_rows, "ebitda")
     recent3_periods_consecutive = len(recent_rows) == 3 and all(
         consecutive_annual_periods(recent_rows[i]["period_end"], recent_rows[i + 1]["period_end"])
         for i in range(2)
     )
+
+    # Walk backwards from the latest year and include every row that is consecutive
+    long_rows = [rows[-1]]
+    for i in range(len(rows) - 2, -1, -1):
+        if consecutive_annual_periods(rows[i]["period_end"], long_rows[0]["period_end"]):
+            long_rows.insert(0, rows[i])
+        else:
+            break
+    long_rows = long_rows[-min(5, len(long_rows)):]
+
+    recent3_cfo_pat = cash_conversion_window(recent_rows, "pat")
+    recent3_cfo_ebitda = cash_conversion_window(recent_rows, "ebitda")
+    long_window_cfo_pat = cash_conversion_window(long_rows, "pat",
+                                                  min_years=min(3, len(long_rows)))
+    long_window_cfo_ebitda = cash_conversion_window(long_rows, "ebitda",
+                                                     min_years=min(3, len(long_rows)))
+
     recent3_pat_pairs = sum(valid(r.get("cfo")) and valid(r.get("pat")) for r in recent_rows)
     recent3_ebitda_pairs = sum(valid(r.get("cfo")) and valid(r.get("ebitda")) for r in recent_rows)
     long_window_years = [r["year"] for r in long_rows]
     recent3_years = [r["year"] for r in recent_rows]
-    long_window_label = (f"{len(long_rows)}Y" if len(long_rows) == 5 else
-                         f"{len(long_rows)}Y available" if len(long_rows) == 4 else "not available")
+
+    long_window_label = (f"{len(long_rows)}Y" if len(long_rows) >= 3
+                         else "not available")
     five_year_cfo_pat = long_window_cfo_pat if len(long_rows) == 5 else None
     five_year_cfo_ebitda = long_window_cfo_ebitda if len(long_rows) == 5 else None
-    five_year_periods_consecutive = (len(long_rows) == 5 and all(
-        consecutive_annual_periods(long_rows[i]["period_end"], long_rows[i + 1]["period_end"])
-        for i in range(4)
-    ))
-    prior_two_rows = rows[-5:-3] if five_year_periods_consecutive else []
-    prior2_cfo_pat = cash_conversion_window(prior_two_rows, "pat", min_years=2)
-    prior2_cfo_ebitda = cash_conversion_window(prior_two_rows, "ebitda", min_years=2)
 
-    # Primary ratios used in forensic deductions, tiers and ranking are trailing 3Y.
-    # For direction, compare trailing 3Y against the preceding, non-overlapping 2Y
-    # when a complete five-year history exists. The full 5Y aggregate remains context.
+    # Trend comparison: compare recent 3Y with whatever consecutive prior years exist
+    prior_rows_candidates = [r for r in long_rows if r not in recent_rows]
+    prior_rows = []
+    if prior_rows_candidates:
+        tail = prior_rows_candidates[-1]
+        if recent_rows and consecutive_annual_periods(tail["period_end"],
+                                                       recent_rows[0]["period_end"]):
+            prior_rows = prior_rows_candidates[-2:]
+
+    prior_window_label = f"{len(prior_rows)}Y" if prior_rows else "unavailable"
+    prior2_cfo_pat = cash_conversion_window(prior_rows, "pat",
+                                             min_years=min(len(prior_rows), 2)) if prior_rows else None
+    prior2_cfo_ebitda = cash_conversion_window(prior_rows, "ebitda",
+                                                min_years=min(len(prior_rows), 2)) if prior_rows else None
+
     cum_cfo_pat = recent3_cfo_pat
     cum_cfo_ebitda = recent3_cfo_ebitda
     cash_conversion_delta = None
-    cash_conversion_trend = "unavailable - need five consecutive years"
+    cash_conversion_trend = f"unavailable - no consecutive prior years (long window: {long_window_label})"
     if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
         cash_conversion_delta = recent3_cfo_pat - prior2_cfo_pat
         if cash_conversion_delta >= 0.15:
-            cash_conversion_trend = "improving"
+            cash_conversion_trend = f"improving (vs preceding {prior_window_label})"
         elif cash_conversion_delta <= -0.15:
-            cash_conversion_trend = "deteriorating"
+            cash_conversion_trend = f"deteriorating (vs preceding {prior_window_label})"
             flags.append(
                 f"Cash conversion deteriorating: recent 3Y CFO/PAT {recent3_cfo_pat:.2f}x "
-                f"vs preceding 2Y {prior2_cfo_pat:.2f}x"
+                f"vs preceding {prior_window_label} {prior2_cfo_pat:.2f}x"
             )
         else:
-            cash_conversion_trend = "broadly stable"
+            cash_conversion_trend = f"broadly stable (vs preceding {prior_window_label})"
 
-    # 3. Recent cumulative CFO / PAT. At least three complete consecutive years required.
+    # 3. Recent cumulative CFO / PAT
     if valid(cum_cfo_pat):
         if cum_cfo_pat < 0.5:
             flags.append(f"Critical recent 3Y CFO/PAT: {cum_cfo_pat:.2f}x")
@@ -1157,8 +1174,7 @@ def run_forensic(records):
             flags.append(f"Weak recent 3Y CFO/PAT: {cum_cfo_pat:.2f}x")
             cash_ded += 20
 
-    # 4. Recent cumulative CFO / EBITDA. Negative EBITDA years remain in the sum;
-    # a non-positive cumulative denominator makes the ratio unavailable.
+    # 4. Recent cumulative CFO / EBITDA
     if valid(cum_cfo_ebitda):
         if cum_cfo_ebitda < 0.5:
             flags.append(f"Critical recent 3Y CFO/EBITDA: {cum_cfo_ebitda:.2f}x")
@@ -1167,7 +1183,6 @@ def run_forensic(records):
             flags.append(f"Weak recent 3Y CFO/EBITDA: {cum_cfo_ebitda:.2f}x")
             cash_ded += 15
 
-    # Annual ratio trend is interpretable only where EBITDA is positive.
     paired_ebitda_positive = [r for r in rows if valid(r.get("cfo"))
                               and valid(r.get("ebitda")) and r["ebitda"] > 0]
     cfo_ebitda_trend = [(r["year"], r["cfo"] / r["ebitda"]) for r in paired_ebitda_positive]
@@ -1189,7 +1204,7 @@ def run_forensic(records):
         flags.append("Negative cumulative operating cash flow over the recent 3Y window")
         cash_ded += 25
 
-    # 5. Latest-year accrual ratio. Require adjacent balance-sheet periods.
+    # 5. Latest-year accrual ratio
     accrual = None
     ni, cfo = latest.get("pat"), latest.get("cfo")
     ta_l, ta_p = latest.get("assets"), prior.get("assets")
@@ -1202,11 +1217,10 @@ def run_forensic(records):
             flags.append(f"Elevated accrual ratio: {accrual:.1f}%")
             cash_ded += 10
 
-    # Avoid repeatedly punishing the same underlying cash-quality problem.
     cash_ded = min(cash_ded, 50)
     score = max(0, score - cash_ded)
 
-    # EBITDA margin trend (context only).
+    # EBITDA margin trend (context only)
     margins = [(r["year"], r["ebitda"] / r["revenue"] * 100) for r in rows
                if valid(r.get("ebitda")) and valid(r.get("revenue")) and r["revenue"] > 0]
     margin_trend = "stable"
@@ -1219,7 +1233,7 @@ def run_forensic(records):
     int_cov_trend = [(r["year"], r["ebit"] / r["interest_expense"]) for r in rows
                      if valid(r.get("ebit")) and valid(r.get("interest_expense")) and r["interest_expense"] > 0]
 
-    # Cash conversion cycle: use the prior balance only when it is the adjacent year.
+    # Cash conversion cycle
     ccc_rows = []
     for i in range(1, len(rows)):
         cur, prev = rows[i], rows[i - 1]
@@ -1261,8 +1275,6 @@ def run_forensic(records):
                 flags.append(f"Payables stretch: DPO +{dpo_growth:.0f}% with weak recent 3Y cash conversion")
 
     annual_periods = [r["year"] for r in rows]
-    # SOP minimum is three paired annual years. Older missing observations do not
-    # invalidate a complete recent 3Y scoring window; any longer window is separately disclosed.
     complete = bool(
         recent3_periods_consecutive
         and recent3_pat_pairs == 3
@@ -1293,6 +1305,7 @@ def run_forensic(records):
         "five_year_cfo_ebitda": five_year_cfo_ebitda,
         "prior2_cfo_pat": prior2_cfo_pat,
         "prior2_cfo_ebitda": prior2_cfo_ebitda,
+        "prior_window_label": prior_window_label,
         "cash_conversion_trend": cash_conversion_trend,
         "cash_conversion_delta": cash_conversion_delta,
     }
@@ -1311,14 +1324,11 @@ def run_moat(records):
     values = [v for _, v, _ in roe_rows]
     total = len(values)
     above = sum(v > MIN_ROE for v in values)
-    all_periods_contiguous = (len(roe_rows) >= 2 and
-        all(consecutive_annual_periods(roe_rows[i][2], roe_rows[i + 1][2])
-            for i in range(len(roe_rows) - 1)))
 
-    if total >= 4 and above == total and all_periods_contiguous:
+    if total >= 4 and above == total:
         consistency = "established moat proxy"
     elif (total >= 3 and values[-1] > MIN_ROE and values[-2] > MIN_ROE
-          and all_periods_contiguous and values[-1] >= float(np.mean(values[:-2]))):
+          and values[-1] >= float(np.mean(values[:-2]))):
         consistency = "emerging moat proxy"
     else:
         consistency = "weak/unproven moat"
@@ -1480,7 +1490,6 @@ def run_holdings(yahoo, override):
         elif promoter > 75:
             flags.append(f"High promoter concentration {promoter:.1f}% (review minority-shareholder protections)")
     else:
-        # The SOP explicitly says missing ownership data is not penalised.
         flags.append("Verified promoter data unavailable (upload ownership CSV)")
 
     if valid(inst) and inst < 5:
@@ -1528,9 +1537,6 @@ def run_valuation(pe, eps_growth, sales_growth, data, mcap):
         growth_raw = float(eps_growth)
         if valid(sales_growth) and sales_growth > 0 and eps_growth > 2 * sales_growth:
             growth_raw, turnaround = float(sales_growth), True
-        # Preserve the v2.4 PEG methodology: use the observed growth rate, without
-        # mechanically capping it at 30%. High growth is an analyst-review prompt,
-        # not an automatic valuation penalty or tier downgrade.
         growth_used = growth_raw
         peg = pe / growth_used
         note = f"P/E {pe:.1f} / growth {growth_used:.1f}%"
@@ -1562,7 +1568,7 @@ def run_valuation(pe, eps_growth, sales_growth, data, mcap):
 
 
 # ============================================================
-# COMPOSITE RANKING (each factor 0-100; missing = excluded, not zero)
+# COMPOSITE RANKING
 # ============================================================
 def score_peg(peg):
     if not valid(peg) or peg <= 0:
@@ -1713,7 +1719,7 @@ def one_year_return(data):
         return None
     try:
         latest_date = pd.Timestamp(prices.index[-1]).tz_localize(None)
-        if (pd.Timestamp.now().normalize() - latest_date.normalize()).days > 7:
+        if (pd.Timestamp.now().normalize() - latest_date.normalize()).days > 15:
             return None
         target = latest_date - pd.Timedelta(days=365)
         index = pd.DatetimeIndex(prices.index)
@@ -1724,12 +1730,11 @@ def one_year_return(data):
             return None
         old_date, old = eligible[-1]
         new = float(prices.iloc[-1])
-        if (target - old_date).days > 7 or old <= 0 or new <= 0:
+        if (target - old_date).days > 15 or old <= 0 or new <= 0:
             return None
         return (new / old - 1) * 100
     except Exception:
         return None
-
 
 
 def full_analysis(ticker, ownership):
@@ -1755,7 +1760,6 @@ def full_analysis(ticker, ownership):
     val = run_valuation(l1["pe"], l1["eps_growth"], l1["sales_cagr"], data, l1["mcap"])
     holdings = run_holdings(data.get("holdings", {}), ownership.get(ticker, {}))
 
-    # Zero-flags FULL rule includes explicitly flagged ownership, interest-cover and valuation risks.
     decision_flags = list(acct.get("flags", []))
     decision_flags.extend(f for f in holdings.get("flags", []) if "unavailable" not in f.lower())
     if valid(l1.get("int_cov")) and 3 <= l1["int_cov"] < 8:
@@ -1776,7 +1780,6 @@ def full_analysis(ticker, ownership):
             "holdings": holdings, "decision_flags": decision_flags,
             "tier": tier, "size": size, "reason": reason,
             "composite": composite, "ranking_coverage": coverage, "components": comps}
-
 
 
 def result_row(r):
@@ -2051,7 +2054,7 @@ def gen_scorecard(r):
         ("Recent 3Y CFO/PAT (score)", fmt(a.get("recent3_cfo_pat"), ".2f", "x")),
         ("Recent 3Y CFO/EBITDA (score)", fmt(a.get("recent3_cfo_ebitda"), ".2f", "x")),
         (f"{a.get('long_window_label', 'Longer')} CFO/PAT (context)", fmt(a.get("long_window_cfo_pat"), ".2f", "x")),
-        ("Preceding 2Y CFO/PAT", fmt(a.get("prior2_cfo_pat"), ".2f", "x")),
+        (f"Preceding {a.get('prior_window_label', 'n/a')} CFO/PAT", fmt(a.get("prior2_cfo_pat"), ".2f", "x")),
         ("Cash conversion trend", a.get("cash_conversion_trend", "unavailable")),
         ("Accrual ratio", fmt(a.get("accrual_ratio"), ".1f", "%")),
         (f"Moat ({m.get('total_years', 0)} yrs)", f"{m.get('pct', 0)}% - {m.get('consistency', 'n/a')}"),
@@ -2108,8 +2111,6 @@ def analyse_with_funnel(ticker, ownership, pe_diagnostics=None):
         return None, "financial"
     l1 = r["l1"]
 
-    # Independent diagnostic: count P/E availability before the sequential funnel.
-    # This count intentionally overlaps with other rejection reasons.
     if pe_diagnostics is not None:
         pe_diagnostics["checked_nonfinancial"] += 1
         if not valid(l1.get("pe")):
@@ -2184,65 +2185,8 @@ def get_nifty_tickers(max_stocks, uploaded=None):
                        "niftyindices.com and upload it in the sidebar. Details: " + errors)
 
 
-def apply_sector_cap(candidates, top_n, cap_pct=30):
-    """Greedy sector-cap replacement without reintroducing removed names or oscillating."""
-    if candidates.empty or top_n <= 0:
-        return candidates.head(0).copy()
-
-    ranked = candidates.sort_values("composite", ascending=False).copy()
-    selected = ranked.head(top_n).copy()
-    remaining = ranked.iloc[top_n:].copy()
-
-    def sector_shares(frame):
-        allocations = frame["tier"].map(TIER_MIDPOINT).fillna(0.0)
-        total = float(allocations.sum())
-        if total <= 0:
-            return pd.Series(dtype=float)
-        return allocations.groupby(frame["sector"].fillna("Unknown")).sum() / total * 100.0
-
-    # Each replacement uses the weakest constituent of the most-overweight sector.
-    # Replaced names are not returned to the candidate pool, preventing oscillation.
-    max_iterations = min(len(remaining), len(selected) * max(1, len(ranked)))
-    for _ in range(max_iterations):
-        shares = sector_shares(selected)
-        if shares.empty:
-            break
-        over = shares[shares > cap_pct + 1e-9]
-        if over.empty or remaining.empty:
-            break
-        bad_sector = over.sort_values(ascending=False).index[0]
-        weakest_idx = selected[selected["sector"].fillna("Unknown") == bad_sector].sort_values("composite").index[0]
-        base = selected.drop(index=weakest_idx)
-        best_idx, best_key = None, None
-        for idx, candidate in remaining.iterrows():
-            test = pd.concat([base, remaining.loc[[idx]]])
-            test_shares = sector_shares(test)
-            max_excess = max(0.0, float((test_shares - cap_pct).clip(lower=0).max())) if not test_shares.empty else 0.0
-            bad_sector_share = float(test_shares.get(bad_sector, 0.0))
-            # Prefer a feasible composition; else reduce maximum breach, then target breach;
-            # tie-break on the highest composite score.
-            key = (0 if max_excess <= 1e-9 else 1, max_excess,
-                   bad_sector_share, -float(candidate["composite"]))
-            if best_key is None or key < best_key:
-                best_idx, best_key = idx, key
-        if best_idx is None:
-            break
-        if best_key[1] >= float((shares - cap_pct).clip(lower=0).max()) - 1e-9:
-            # No replacement improves the worst sector breach.
-            break
-        selected = pd.concat([base, remaining.loc[[best_idx]]])
-        remaining = remaining.drop(index=best_idx)
-
-    return selected.sort_values("composite", ascending=False)
-
-
-
 def apply_portfolio_weights(df):
-    """Apply tier midpoints, a maximum of five FULL positions, and a 100% exposure cap.
-
-    The company-level research tier is retained. If more than five FULL names appear in
-    the shortlist, the lower-ranked excess FULL names receive a STANDARD-sized allocation.
-    """
+    """Apply tier midpoints, a maximum of five FULL positions, and a 100% exposure cap."""
     df = df.copy()
     raw = df["tier"].map(TIER_MIDPOINT).fillna(0.0).astype(float)
     df["portfolio_size_band"] = df["tier"].map(TIER_SIZE).fillna("0%")
@@ -2385,7 +2329,8 @@ if page == "Single Stock":
                 long_years = a.get("long_window_years", [])
                 st.caption(
                     "Forensic cash-conversion scoring uses the latest three consecutive annual periods. "
-                    "A longer aggregate (up to five years) is shown separately. When five full years are available, trend compares the latest three years with the preceding two years."
+                    "A longer aggregate is shown separately (3-5 years, whatever is available). "
+                    "Trend compares recent 3Y with the preceding 1-2 consecutive years when they exist."
                 )
                 st.caption("Scoring window: " + (", ".join(recent_years) if recent_years else "not available"))
                 st.caption(
@@ -2395,7 +2340,7 @@ if page == "Single Stock":
                 k1, k2, k3 = st.columns(3)
                 k1.metric("Recent 3Y CFO/PAT (scoring)", fmt(a.get("recent3_cfo_pat"), ".2f", "x"))
                 k2.metric("Longer-window CFO/PAT", fmt(a.get("long_window_cfo_pat"), ".2f", "x"),
-                          help="Uses five consecutive years when available. If the provider supplies only three or four years, the actual window length is shown above.")
+                          help=f"Uses up to 5 consecutive years when available. Current window: {a.get('long_window_label', 'unavailable')}")
                 k3.metric("Latest-year accrual ratio", fmt(a.get("accrual_ratio"), ".1f", "%"))
                 k4, k5, k6 = st.columns(3)
                 k4.metric("Recent 3Y CFO/EBITDA", fmt(a.get("recent3_cfo_ebitda"), ".2f", "x"))
@@ -2403,8 +2348,8 @@ if page == "Single Stock":
                 k6.metric("Cash conversion trend", a.get("cash_conversion_trend", "unavailable").title())
                 if a.get("cash_conversion_delta") is not None:
                     st.caption(
-                        f"Recent 3Y CFO/PAT is {a['cash_conversion_delta']:+.2f}x versus the preceding 2Y. "
-                        "These comparison windows do not overlap. The 5Y aggregate is displayed separately as longer-term context."
+                        f"Recent 3Y CFO/PAT is {a['cash_conversion_delta']:+.2f}x versus the preceding "
+                        f"{a.get('prior_window_label', 'n/a')}. These comparison windows do not overlap."
                     )
                 if a.get("margins_by_year"):
                     st.markdown("**EBITDA margins:** " + " -> ".join(f"{y}: {x:.1f}%" for y, x in a["margins_by_year"])
@@ -2520,7 +2465,6 @@ elif page == "Auto Top 10":
     c1, c2 = st.columns(2)
     max_stocks = c1.slider("Companies to screen (500 = full universe)", 20, 500, 500, 10)
     top_n = c2.slider("Shortlist size", 5, 30, 10)
-    use_cap = st.checkbox("Apply 30% sector cap", value=True)
 
     if st.button("Run screen", type="primary", use_container_width=True):
         try:
@@ -2596,7 +2540,7 @@ elif page == "Auto Top 10":
             st.warning("All qualifying companies were rated WATCH.")
             st.stop()
 
-        selected = apply_sector_cap(df, top_n, 30) if use_cap else df.head(top_n).copy()
+        selected = df.head(top_n).copy()
         selected, scale = apply_portfolio_weights(selected)
 
         if scale < 1:
@@ -2604,11 +2548,6 @@ elif page == "Auto Top 10":
         else:
             st.info(f"Suggested weights total {selected['portfolio_weight'].sum():.1f}%; "
                     f"cash {100 - selected['portfolio_weight'].sum():.1f}%.")
-        if use_cap:
-            sw = selected.assign(_sector=selected["sector"].fillna("Unknown")).groupby("_sector")["portfolio_weight"].sum()
-            tot = selected["portfolio_weight"].sum()
-            if tot > 0 and (sw / tot * 100).max() > 30:
-                st.warning("30% sector cap could not be fully met with the available candidates.")
 
         st.markdown("### Ranked shortlist")
         show = ["ticker", "name", "sector", "tier", "portfolio_size_band", "portfolio_weight",
@@ -2655,23 +2594,32 @@ else:
 
 **3. Debt.** Gross borrowings = short-term + long-term borrowing lines (excluding leases) when both are reported; otherwise Yahoo's Total Debt (may include leases, so D/E may be slightly overstated). A single partial borrowing line is never accepted. A company is treated as debt-free only when Yahoo shows no borrowing lines at all AND interest expense is reported near zero; otherwise D/E is N/A and must be verified manually. Interest coverage below 3x caps at HALF.
 
-**4. Forensics (score starts at 100).** Receivables rising 3 years in a row (-15), material inventory growing 10+ points faster than revenue (-15), trailing 3Y CFO/PAT (-20 / -30), trailing 3Y CFO/EBITDA (-15 / -20), worsening annual CFO/EBITDA (-10), negative trailing 3Y CFO (-25), accrual ratio (-10 / -20). The latest three consecutive annual periods are the primary scoring window so recent deterioration or improvement is not hidden by older history. A separate longer aggregate uses five consecutive annual periods where available; if only four years are supplied, the actual 4Y period is labelled. Where five years are available, the recent 3Y ratio is compared with the preceding non-overlapping 2Y ratio to identify direction; the 5Y aggregate is also displayed as context. The trend flag does not add a second numeric deduction. Cash-flow deductions are capped at 50 and the score cannot go below 0. Three paired consecutive years are required; incomplete recent data makes the score provisional and blocks FULL.
+**4. Forensics (score starts at 100).** Receivables rising 3 years in a row (-15), material inventory growing 10+ points faster than revenue (-15), trailing 3Y CFO/PAT (-20 / -30), trailing 3Y CFO/EBITDA (-15 / -20), worsening annual CFO/EBITDA (-10), negative trailing 3Y CFO (-25), accrual ratio (-10 / -20). The latest three consecutive annual periods are the primary scoring window. A separate longer aggregate uses whatever consecutive annual history is available (3-5 years). Trend compares recent 3Y with the preceding 1-2 consecutive years when they exist. Cash-flow deductions are capped at 50 and the score cannot go below 0.
 
-**5. Working capital.** CCC = DSO + DIO - DPO on average balances (DSO on revenue, DIO/DPO on cost of revenue). DIO is excluded when inventory is immaterial; a warning shows when cost of revenue is under 10% of sales.
+**5. Working capital.** CCC = DSO + DIO - DPO on average balances. DIO is excluded when inventory is immaterial.
 
-**6. Moat proxy.** Established: ROE above 15% in every year (minimum 4 consecutive years). Emerging: at least 3 consecutive years, latest two above 15%, and latest ROE at least the earlier-years' average. This is a proxy only - verify pricing power, brand, switching costs and distribution yourself.
+**6. Moat proxy.** Established: ROE above 15% in every year (minimum 4 years). Emerging: at least 3 years, latest two above 15%, and latest ROE at least the earlier-years' average.
 
 **7. Ownership (leading).** Upload verified promoter, institutional and pledge data. Promoter below 20% caps at STANDARD; pledge above 25% caps at STANDARD, 50%+ caps at HALF.
 
-**8. Valuation.** P/E uses Yahoo trailing P/E when within a broad sanity range and cross-checks it against price / trailing EPS when available; an un-cross-checked vendor multiple is labelled lower-confidence. Otherwise the app uses validated trailing EPS or market capitalisation / four consecutive quarters of PAT. Suspicious P/E values are shown as unavailable, never forced into PEG. PEG = trailing P/E / selected observed growth (sales growth used if EPS growth is more than twice sales growth). Growth above 30% is flagged for analyst review but is not mechanically capped; the same observed growth input is used in PEG, as in v2.4. Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield is calculated only as CFO minus capex when both inputs are present. P/E above 80 is a warning.
+**8. Valuation.** P/E uses Yahoo trailing P/E when within a broad sanity range and cross-checks it against price / trailing EPS when available. Otherwise the app uses validated trailing EPS or market capitalisation / four consecutive quarters of PAT. PEG = trailing P/E / selected observed growth (sales growth used if EPS growth is more than twice sales growth). Growth above 30% is flagged for analyst review but is not mechanically capped. Negative EPS growth makes PEG not meaningful. FCF yield is calculated only as CFO minus capex when both inputs are present (reported FCF used as last-resort fallback). P/E above 80 is a warning.
 
-**9. Momentum (leading).** EPS vs the same quarter last year for the latest two consecutive reported quarters; when the latest quarter pair is incomplete, only the latest valid comparison is scored.
+**9. Momentum (leading).** EPS vs the same quarter last year for the latest two consecutive reported quarters.
 
-**10. Cyclicality.** Requires at least four consecutive annual ROE values. Peak warning when latest ROE is more than twice the average of prior years and above 20%; insufficient history blocks FULL rather than being treated as “no peak”.
+**10. Cyclicality.** Requires at least four consecutive annual ROE values. Peak warning when latest ROE is more than twice the average of prior years and above 20%.
 
 **11. Tiers.** FULL 12-15%: score 85+, zero flags, moat proxy, PEG at most 1.0, no cyclical peak, complete data. STANDARD 8-10%: score 70+, at most one flag, PEG at most 1.5. HALF 4-6%: everything else that is not WATCH. WATCH 0%: score below 50, PEG above 5, or two or more hard-filter failures.
 
-**12. Ranking and portfolio sizing.** PEG 25%, forensic 20%, earnings momentum 15%, CFO quality 15%, moat consistency 15%, ROE 10%. Each factor is scored 0-100; missing factors are excluded and at least 80% coverage is required. The Top 10 applies an optional 30% sector cap, limits the portfolio to five FULL positions (excess FULL names keep their research tier but receive a STANDARD-sized allocation), and caps total exposure at 100%.
+**12. Ranking and portfolio sizing.** PEG 25%, forensic 20%, earnings momentum 15%, CFO quality 15%, moat consistency 15%, ROE 10%. Each factor is scored 0-100; missing factors are excluded and at least 80% coverage is required. The Top 10 limits the portfolio to five FULL positions (excess FULL names keep their research tier but receive a STANDARD-sized allocation), and caps total exposure at 100%.
+
+**v2.8 fixes vs v2.7:**
+- CAGR calculation now uses the longest clean positive window instead of demanding every data point be perfect - fixes most "growth unavailable" rejections
+- 5Y CFO/PAT and trend windows gracefully handle 3-4 years of Yahoo data instead of showing N/A
+- EPS field selection restored to v2.4 tolerance (3+ valid obs, not every obs valid)
+- Moat proxy no longer requires strict date contiguity
+- FCF fallback to reported Free Cash Flow restored as last resort
+- 1Y return date tolerance loosened from 7 to 15 days
+- Sector cap removed
 
 **Limitations.** Yahoo Finance access through yfinance is unofficial, can be rate-limited or changed, and data can be wrong, restated or missing. This app is not an institutional data terminal. Verify every key figure in exchange filings/annual reports. Thresholds are mostly absolute, not sector-relative; portfolio liquidity, volatility, correlation, drawdown and factor exposures are not modelled. No empirical backtest or live track record is supplied. Management quality, related-party transactions and sell decisions require separate analyst work.
     """)
