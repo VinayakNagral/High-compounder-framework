@@ -602,7 +602,41 @@ def get_market_cap(data, price):
 
 
 def get_pe(data, price):
-    return 777.77, "TEST - NEW FUNCTION RUNNING"
+
+    info = data.get("info", {})
+    qfin = data.get("qfin")
+
+    print("\n========== INFOSYS PE DEBUG ==========")
+
+    print("PRICE:", price)
+    print("CURRENCY:", info.get("currency"))
+    print("FINANCIAL CURRENCY:", info.get("financialCurrency"))
+
+    print("TRAILING PE:", info.get("trailingPE"))
+    print("TRAILING EPS:", info.get("trailingEps"))
+
+    print("MARKET CAP:", info.get("marketCap"))
+
+    if qfin is not None:
+
+        field = choose_eps_field(qfin)
+
+        print("SELECTED EPS FIELD:", field)
+
+        if field:
+            for dt, col in dated_columns(qfin)[:8]:
+                print(
+                    dt,
+                    "EPS:",
+                    safe_get(qfin, field, col)
+                )
+
+    else:
+        print("QUARTERLY STATEMENT NOT AVAILABLE")
+
+    print("======================================\n")
+
+    return None, "Temporary P/E data investigation"
 
 # ============================================================
 # DEBT AND INTEREST COVERAGE
