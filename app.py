@@ -1182,19 +1182,27 @@ def run_forensic(records):
     cum_cfo_pat = recent3_cfo_pat
     cum_cfo_ebitda = recent3_cfo_ebitda
     cash_conversion_delta = None
-    cash_conversion_trend = f"unavailable - no consecutive prior years (long window: {long_window_label})"
-    if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
+      cash_conversion_trend = (
+        f"unavailable - no consecutive prior years (actual history: {long_window_label})"
+    )
+      if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
         cash_conversion_delta = recent3_cfo_pat - prior2_cfo_pat
-        if cash_conversion_delta >= 0.15:
-            cash_conversion_trend = f"improving (vs preceding {prior_window_label})"
-        elif cash_conversion_delta <= -0.15:
-            cash_conversion_trend = f"deteriorating (vs preceding {prior_window_label})"
-            flags.append(
-                f"Cash conversion deteriorating: recent 3Y CFO/PAT {recent3_cfo_pat:.2f}x "
-                f"vs preceding {prior_window_label} {prior2_cfo_pat:.2f}x"
-            )
+        # Require a bigger delta for 1Y prior windows (noisier); gentler for 2Y
+        threshold = 0.25 if len(prior_rows) == 1 else 0.15
+        noisy_suffix = " [noisy - 1Y prior only]" if len(prior_rows) == 1 else ""
+
+        if cash_conversion_delta >= threshold:
+            cash_conversion_trend = f"improving (vs preceding {prior_window_label}){noisy_suffix}"
+        elif cash_conversion_delta <= -threshold:
+            cash_conversion_trend = f"deteriorating (vs preceding {prior_window_label}){noisy_suffix}"
+            # Only raise a hard flag on 2Y comparisons (1Y is too volatile)
+            if len(prior_rows) >= 2:
+                flags.append(
+                    f"Cash conversion deteriorating: recent 3Y CFO/PAT {recent3_cfo_pat:.2f}x "
+                    f"vs preceding {prior_window_label} {prior2_cfo_pat:.2f}x"
+                )
         else:
-            cash_conversion_trend = f"broadly stable (vs preceding {prior_window_label})"
+            cash_conversion_trend = f"broadly stable (vs preceding {prior_window_label}){noisy_suffix}"
 
     # 3. Recent cumulative CFO / PAT
     if valid(cum_cfo_pat):
@@ -1925,12 +1933,17 @@ def gen_layers(r):
     else:
         L.append(("PEG valuation", "fail" if v.get("eps_negative") else "warn", v.get("peg_note", "N/A")))
 
-    fcf = v.get("fcf_yield")
-    if valid(fcf):
-        st_y = "pass" if fcf > 3 else "warn" if fcf > 0 else "fail"
-        L.append(("FCF yield", st_y, f"{fcf:.1f}%" + (" - thin" if 0 < fcf <= 3 else " - negative" if fcf <= 0 else "")))
-    else:
-        L.append(("FCF yield", "warn", "Not calculable (CFO or capex missing)"))
+       if valid(fcf):
+        # Near-zero (±0.5%) is effectively "no FCF cushion" - flag as warn, not pass
+        if fcf > 3:
+            st_y, suffix = "pass", ""
+        elif fcf > 0.5:
+            st_y, suffix = "warn", " - thin"
+        elif fcf > -0.5:
+            st_y, suffix = "warn", " - effectively zero FCF"
+        else:
+            st_y, suffix = "fail", " - negative"
+        L.append(("FCF yield", st_y, f"{fcf:.1f}%{suffix}"))
 
     if v.get("pe_extreme"):
         L.append(("Extreme valuation", "warn", f"P/E {l1['pe']:.1f}x above 80x"))
@@ -2581,15 +2594,15 @@ elif page == "Auto Top 10":
                     f"cash {100 - selected['portfolio_weight'].sum():.1f}%.")
 
         st.markdown("### Ranked shortlist")
-        show = ["ticker", "name", "sector", "tier", "portfolio_size_band", "portfolio_weight",
+              show = ["ticker", "name", "sector", "tier", "portfolio_size_band", "portfolio_weight",
                 "allocation_adjustment", "composite", "coverage", "forensic",
                 "pe", "peg", "roe", "roce", "de", "sales_cagr", "pat_cagr", "eps_growth",
-                "cfo_pat_3y", "cfo_pat_long_window", "cfo_pat_5y", "cash_conversion_trend",
+                "cfo_pat_3y", "cfo_ebitda_3y", "cfo_pat_long_window", "cfo_ebitda_long_window",
+                "cash_conversion_trend",
                 "moat_pct", "momentum", "fcf_yield", "int_cov", "promoter_pct", "pledge_pct", "return_1y"]
         st.dataframe(selected[show].round(2), hide_index=True, use_container_width=True)
 
-        export = selected[show + ["cfo_ebitda", "cfo_ebitda_3y", "cfo_ebitda_5y",
-                                  "cfo_pat_5y", "cfo_pat_prior2y", "cash_conversion_trend",
+               export = selected[show + ["cfo_pat_5y", "cfo_ebitda_5y", "cfo_pat_prior2y",
                                   "accrual_pct", "net_debt_cr", "reason"]]
         st.download_button("Download shortlist (CSV)", export.to_csv(index=False),
                            file_name=f"high_compounder_v{VERSION}_top{len(selected)}_{datetime.now():%d%b%Y}.csv",
