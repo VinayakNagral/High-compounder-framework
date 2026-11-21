@@ -1528,14 +1528,16 @@ def run_valuation(pe, eps_growth, sales_growth, data, mcap):
         growth_raw = float(eps_growth)
         if valid(sales_growth) and sales_growth > 0 and eps_growth > 2 * sales_growth:
             growth_raw, turnaround = float(sales_growth), True
-        # SOP's manual 30% sustainability check is implemented as a transparent guardrail.
-        growth_used = min(growth_raw, 30.0)
+        # Preserve the v2.4 PEG methodology: use the observed growth rate, without
+        # mechanically capping it at 30%. High growth is an analyst-review prompt,
+        # not an automatic valuation penalty or tier downgrade.
+        growth_used = growth_raw
         peg = pe / growth_used
         note = f"P/E {pe:.1f} / growth {growth_used:.1f}%"
         if turnaround:
             note += " (sales growth used: EPS growth > 2x sales)"
-        if growth_raw > 30:
-            note += " (30% sustainability cap applied)"
+        if growth_used > 30:
+            note += " (growth above 30%; verify sustainability manually; no automatic cap)"
 
     fcf_yield = None
     cf = data.get("cf")
@@ -2661,7 +2663,7 @@ else:
 
 **7. Ownership (leading).** Upload verified promoter, institutional and pledge data. Promoter below 20% caps at STANDARD; pledge above 25% caps at STANDARD, 50%+ caps at HALF.
 
-**8. Valuation.** P/E uses Yahoo trailing P/E when within a broad sanity range and cross-checks it against price / trailing EPS when available; an un-cross-checked vendor multiple is labelled lower-confidence. Otherwise the app uses validated trailing EPS or market capitalisation / four consecutive quarters of PAT. Suspicious P/E values are shown as unavailable, never forced into PEG. PEG = trailing P/E / diluted EPS growth (sales growth used if EPS growth is more than twice sales growth); growth above 30% is capped at 30% under the SOP sanity rule. Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield is calculated only as CFO minus capex when both inputs are present. P/E above 80 is a warning.
+**8. Valuation.** P/E uses Yahoo trailing P/E when within a broad sanity range and cross-checks it against price / trailing EPS when available; an un-cross-checked vendor multiple is labelled lower-confidence. Otherwise the app uses validated trailing EPS or market capitalisation / four consecutive quarters of PAT. Suspicious P/E values are shown as unavailable, never forced into PEG. PEG = trailing P/E / selected observed growth (sales growth used if EPS growth is more than twice sales growth). Growth above 30% is flagged for analyst review but is not mechanically capped; the same observed growth input is used in PEG, as in v2.4. Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield is calculated only as CFO minus capex when both inputs are present. P/E above 80 is a warning.
 
 **9. Momentum (leading).** EPS vs the same quarter last year for the latest two consecutive reported quarters; when the latest quarter pair is incomplete, only the latest valid comparison is scored.
 
