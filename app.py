@@ -603,36 +603,64 @@ def get_market_cap(data, price):
 
 def get_pe(data, price):
     """
-    Use Yahoo trailing P/E first.
-    Cross-check quarterly EPS to avoid incorrect calculations.
+    Calculate trailing P/E using multiple sources.
+    Avoid unverified quarterly EPS values.
     """
+
     info = data.get("info", {})
 
-    # 1. Get provider-reported trailing P/E
+    # SOURCE 1: Yahoo reported trailing P/E
     reported_pe = number(info.get("trailingPE"))
 
-    # 2. Get provider-reported trailing EPS
-    reported_eps = number(info.get("trailingEps"))
-
-    # 3. Check whether reported P/E is available
     if valid(reported_pe) and reported_pe > 0:
-
         return round(reported_pe, 2), "Yahoo trailing P/E"
 
-    # 4. If P/E is unavailable, calculate using reported trailing EPS
-    if valid(price) and price > 0 and valid(reported_eps) and reported_eps > 0:
+    # SOURCE 2: Price / Yahoo reported trailing EPS
+    reported_eps = number(info.get("trailingEps"))
 
-        calculated_pe = price / reported_eps
+    if valid(price) and valid(reported_eps) and reported_eps > 0:
+        pe = price / reported_eps
 
-        return round(calculated_pe, 2), "Price / Yahoo trailing EPS"
+        return round(pe, 2), "Price / Yahoo trailing EPS"
 
-    # 5. If neither is available, do not trust unverified quarterly EPS
-    data.setdefault("debug", {}).setdefault("warnings", []).append(
-        "P/E unavailable. Verify quarterly EPS and currency manually."
-    )
+    # SOURCE 3: Market capitalisation / TTM PAT
+    qfin = data.get("qfin")
 
-    return None, "Not available - manual verification required"
+    cols = dated_columns(qfin)
 
+    if len(cols) >= 4:
+
+        latest = cols[:4]
+        dates = [dt for dt, col in latest]
+
+        # Ensure quarterly reporting periods are reasonably spaced
+        gaps_ok = all(
+            70 <= (dates[i] - dates[i + 1]).days <= 110
+            for i in range(3)
+        )
+
+        if gaps_ok:
+
+            quarterly_pat = [
+                get_pat(qfin, col)
+                for _, col in latest
+            ]
+
+            if all(valid(x) for x in quarterly_pat):
+
+                ttm_pat = sum(quarterly_pat)
+
+                mcap, source = get_market_cap(data, price)
+
+                if valid(mcap) and mcap > 0 and ttm_pat > 0:
+
+                    pe = mcap / ttm_pat
+
+                    if valid(pe) and pe > 0:
+
+                        return round(pe, 2), "Market cap / TTM PAT"
+
+    return None, "P/E unavailable - verify data manually"
 
 # ============================================================
 # DEBT AND INTEREST COVERAGE
