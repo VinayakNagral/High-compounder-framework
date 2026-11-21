@@ -602,65 +602,7 @@ def get_market_cap(data, price):
 
 
 def get_pe(data, price):
-    """
-    Calculate trailing P/E using multiple sources.
-    Avoid unverified quarterly EPS values.
-    """
-
-    info = data.get("info", {})
-
-    # SOURCE 1: Yahoo reported trailing P/E
-    reported_pe = number(info.get("trailingPE"))
-
-    if valid(reported_pe) and reported_pe > 0:
-        return round(reported_pe, 2), "Yahoo trailing P/E"
-
-    # SOURCE 2: Price / Yahoo reported trailing EPS
-    reported_eps = number(info.get("trailingEps"))
-
-    if valid(price) and valid(reported_eps) and reported_eps > 0:
-        pe = price / reported_eps
-
-        return round(pe, 2), "Price / Yahoo trailing EPS"
-
-    # SOURCE 3: Market capitalisation / TTM PAT
-    qfin = data.get("qfin")
-
-    cols = dated_columns(qfin)
-
-    if len(cols) >= 4:
-
-        latest = cols[:4]
-        dates = [dt for dt, col in latest]
-
-        # Ensure quarterly reporting periods are reasonably spaced
-        gaps_ok = all(
-            70 <= (dates[i] - dates[i + 1]).days <= 110
-            for i in range(3)
-        )
-
-        if gaps_ok:
-
-            quarterly_pat = [
-                get_pat(qfin, col)
-                for _, col in latest
-            ]
-
-            if all(valid(x) for x in quarterly_pat):
-
-                ttm_pat = sum(quarterly_pat)
-
-                mcap, source = get_market_cap(data, price)
-
-                if valid(mcap) and mcap > 0 and ttm_pat > 0:
-
-                    pe = mcap / ttm_pat
-
-                    if valid(pe) and pe > 0:
-
-                        return round(pe, 2), "Market cap / TTM PAT"
-
-    return None, "P/E unavailable - verify data manually"
+    return 777.77, "TEST - NEW FUNCTION RUNNING"
 
 # ============================================================
 # DEBT AND INTEREST COVERAGE
