@@ -1183,7 +1183,7 @@ def run_forensic(records):
     cum_cfo_ebitda = recent3_cfo_ebitda
     cash_conversion_delta = None
     cash_conversion_trend = f"unavailable - no consecutive prior years (actual history: {long_window_label})"
-      if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
+    if valid(recent3_cfo_pat) and valid(prior2_cfo_pat):
         cash_conversion_delta = recent3_cfo_pat - prior2_cfo_pat
         # Require a bigger delta for 1Y prior windows (noisier); gentler for 2Y
         threshold = 0.25 if len(prior_rows) == 1 else 0.15
