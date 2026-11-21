@@ -393,24 +393,31 @@ def get_equity_shares(bs, info):
 # ============================================================
 def choose_eps_field(df):
     """Prefer diluted EPS; basic EPS only if diluted is unavailable.
-    Needs 3+ valid observations for growth; falls back to 2 for momentum."""
+    Requires the LATEST reported period to have a valid value (prevents selecting
+    a field that only has old data, which would produce stale growth/momentum)."""
     if df is None or not isinstance(df, pd.DataFrame) or df.empty:
         return None
-    for field in ("Diluted EPS", "Basic EPS"):
-        count = sum(valid(safe_get(df, field, c)) for c in df.columns)
-        if count >= 3:
-            return field
-    for field in ("Diluted EPS", "Basic EPS"):
-        count = sum(valid(safe_get(df, field, c)) for c in df.columns)
-        if count >= 2:
-            return field
-    return None
 
-
-def eps_getter(df):
-    field = choose_eps_field(df)
-    if field is None:
+    cols = dated_columns(df)  # newest first
+    if not cols:
         return None
+    latest_col = cols[0][1]
+
+    # Growth path: latest value present AND 3+ total valid observations
+    for field in ("Diluted EPS", "Basic EPS"):
+        if valid(safe_get(df, field, latest_col)):
+            total_count = sum(valid(safe_get(df, field, c)) for c in df.columns)
+            if total_count >= 3:
+                return field
+
+    # Momentum fallback: latest value present AND 2+ total valid observations
+    for field in ("Diluted EPS", "Basic EPS"):
+        if valid(safe_get(df, field, latest_col)):
+            total_count = sum(valid(safe_get(df, field, c)) for c in df.columns)
+            if total_count >= 2:
+                return field
+
+    return None
     return lambda f, c: safe_get(f, field, c)
 
 
@@ -652,39 +659,55 @@ def build_multi(fin, bs, cf):
 # GROWTH
 # ============================================================
 def annual_cagr(frame, getter, min_years=2.5):
-    """Annual CAGR using the longest usable positive window.
-    Tolerates isolated missing values and non-consecutive gaps."""
+    """Annual CAGR respecting recent performance.
+    Rules:
+    - Latest reported year must be present and positive (prevents hiding recent losses).
+    - Uses the longest consecutive-positive window ENDING at the latest year.
+    - Caps extreme low-base growth (>200%) with a visible warning instead of silently
+      publishing fake-cheap PEG values (EMMVEE-style distortion).
+    """
     cols = dated_columns(frame, newest_first=False)
     if frame is None or getter is None or len(cols) < 3:
         return None, "", "Insufficient annual data"
 
-    values = []
+    # Collect all observations
+    all_values = []
     for dt, col in cols:
         v = getter(frame, col)
-        if valid(v) and v > 0:
-            values.append((dt, float(v)))
+        all_values.append((dt, number(v)))
 
+    # SAFETY: latest year must exist and be positive.
+    # A loss or missing value in the latest year must NOT be hidden by positive history.
+    latest_dt, latest_v = all_values[-1]
+    if not valid(latest_v):
+        return None, "", "Latest reported year missing; CAGR not calculated"
+    if latest_v <= 0:
+        return None, "", f"Latest reported year {fy_label(latest_dt)} non-positive; CAGR not meaningful"
+
+    # Keep only positive observations
+    values = [(dt, float(v)) for dt, v in all_values if valid(v) and v > 0]
     if len(values) < 3:
         return None, "", "Fewer than three valid positive annual observations"
 
-    # Find the longest consecutive-years sub-sequence
-    best_run = [values[0]]
-    current = [values[0]]
-    for i in range(1, len(values)):
-        if consecutive_annual_periods(current[-1][0], values[i][0]):
-            current.append(values[i])
+    # Latest must be the end of our window (we verified it's positive above)
+    if values[-1][0] != latest_dt:
+        return None, "", "Latest year not in positive-observation window"
+
+    # Walk BACKWARDS from the latest year, adding each consecutive positive year.
+    # This guarantees the CAGR window ends at the latest reported year, not some
+    # older clean stretch that ignores recent deterioration.
+    best_run = [values[-1]]
+    for i in range(len(values) - 2, -1, -1):
+        if consecutive_annual_periods(values[i][0], best_run[0][0]):
+            best_run.insert(0, values[i])
         else:
-            if len(current) > len(best_run):
-                best_run = current
-            current = [values[i]]
-    if len(current) > len(best_run):
-        best_run = current
+            break
 
-    # Fallback to first-to-last valid positive if the clean run is too short
-    run = best_run if len(best_run) >= 3 else values
+    if len(best_run) < 3:
+        return None, "", "Fewer than three consecutive positive years ending at latest period"
 
-    start_dt, start_v = run[0]
-    end_dt, end_v = run[-1]
+    start_dt, start_v = best_run[0]
+    end_dt, end_v = best_run[-1]
     years = (end_dt - start_dt).days / 365.25
     if years < min_years:
         return None, "", "Historical period too short"
@@ -695,11 +718,12 @@ def annual_cagr(frame, getter, min_years=2.5):
     if not valid(growth) or growth > 500:
         return None, "", "CAGR outside accepted range"
 
-    note = f"Annual CAGR over {years:.1f} years"
-    if len(run) < len(values):
-        note += f" (used longest clean window: {len(run)} of {len(values)} points)"
-    return (round(growth, 1), f"{fy_label(start_dt)}-{fy_label(end_dt)}", note)
+    note = f"Annual CAGR over {years:.1f} years ending at {fy_label(end_dt)}"
+    # Flag low-base distortions (prevents EMMVEE-style fake-cheap PEG)
+    if growth > 200:
+        note += " (WARNING: >200% growth, likely low-base distortion; verify manually)"
 
+    return (round(growth, 1), f"{fy_label(start_dt)}-{fy_label(end_dt)}", note)
 
 def quarterly_ttm_growth(qfin, getter):
     """TTM YoY proxy using eight complete, consecutive quarterly observations."""
@@ -1133,21 +1157,28 @@ def run_forensic(records):
     five_year_cfo_pat = long_window_cfo_pat if len(long_rows) == 5 else None
     five_year_cfo_ebitda = long_window_cfo_ebitda if len(long_rows) == 5 else None
 
-    # Trend comparison: compare recent 3Y with whatever consecutive prior years exist
+    # Trend comparison: compare recent 3Y with whatever consecutive prior years exist.
+    # Accepts 1 or 2 prior years. With Yahoo's typical 4-year history, this gives us
+    # recent 3Y vs preceding 1Y. Better than "unavailable" even if noisier than 2Y.
     prior_rows_candidates = [r for r in long_rows if r not in recent_rows]
     prior_rows = []
-    if prior_rows_candidates:
+    if prior_rows_candidates and recent_rows:
         tail = prior_rows_candidates[-1]
-        if recent_rows and consecutive_annual_periods(tail["period_end"],
-                                                       recent_rows[0]["period_end"]):
-            prior_rows = prior_rows_candidates[-2:]
+        if consecutive_annual_periods(tail["period_end"], recent_rows[0]["period_end"]):
+            # Take up to 2 prior years, whichever are consecutive
+            prior_rows = prior_rows_candidates[-2:] if len(prior_rows_candidates) >= 2 else prior_rows_candidates[-1:]
+            # If we took 2, verify they're also consecutive with each other
+            if len(prior_rows) == 2 and not consecutive_annual_periods(
+                prior_rows[0]["period_end"], prior_rows[1]["period_end"]
+            ):
+                prior_rows = prior_rows[-1:]  # keep only the one adjacent to recent
 
     prior_window_label = f"{len(prior_rows)}Y" if prior_rows else "unavailable"
-    prior2_cfo_pat = cash_conversion_window(prior_rows, "pat",
-                                             min_years=min(len(prior_rows), 2)) if prior_rows else None
-    prior2_cfo_ebitda = cash_conversion_window(prior_rows, "ebitda",
-                                                min_years=min(len(prior_rows), 2)) if prior_rows else None
-
+    # min_years=1 allows a single-year prior window (noisier but useful signal)
+    prior2_cfo_pat = (cash_conversion_window(prior_rows, "pat", min_years=1)
+                      if prior_rows else None)
+    prior2_cfo_ebitda = (cash_conversion_window(prior_rows, "ebitda", min_years=1)
+                         if prior_rows else None)
     cum_cfo_pat = recent3_cfo_pat
     cum_cfo_ebitda = recent3_cfo_ebitda
     cash_conversion_delta = None
