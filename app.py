@@ -1930,8 +1930,8 @@ def gen_layers(r):
         L.append(("PEG valuation", st_p, f"PEG {peg:.2f} - {v['peg_note']}"))
     else:
         L.append(("PEG valuation", "fail" if v.get("eps_negative") else "warn", v.get("peg_note", "N/A")))
-
-   if valid(fcf):
+        fcf = v.get("fcf_yield")
+    if valid(fcf):
     # Near-zero (±0.5%) is effectively "no FCF cushion" - flag as warn, not pass
     if fcf > 3:
         st_y, suffix = "pass", ""
