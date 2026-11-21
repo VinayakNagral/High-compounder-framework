@@ -418,8 +418,14 @@ def choose_eps_field(df):
                 return field
 
     return None
-    return lambda f, c: safe_get(f, field, c)
 
+
+def eps_getter(df):
+    """Returns a getter function for the chosen EPS field (Diluted or Basic)."""
+    field = choose_eps_field(df)
+    if field is None:
+        return None
+    return lambda f, c: safe_get(f, field, c)
 
 # ============================================================
 # DATA FETCHING
