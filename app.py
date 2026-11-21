@@ -27,13 +27,13 @@ warnings.filterwarnings("ignore")
 # CONFIGURATION
 # ============================================================
 st.set_page_config(
-    page_title="High Compounder Framework v2.4",
+    page_title="High Compounder Framework v2.5",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-VERSION = "2.4"
+VERSION = "2.5"
 AUTHOR = "Vinayak Nagral"
 NAVY = "#1B2A4A"
 
@@ -378,14 +378,70 @@ def eps_getter(df):
 # ============================================================
 @st.cache_data(ttl=3600, show_spinner=False)
 def fetch_stock(ticker):
-    debug = {"ticker": ticker, "warnings": [], "sources": []}
+    """Fetch price, quote metadata and statements with visible fallback diagnostics."""
+    debug = {"ticker": ticker, "warnings": [], "sources": [], "valuation": {}}
     try:
         t = yf.Ticker(ticker)
+
+        # Yahoo's quote-summary/info endpoint can intermittently return incomplete data.
+        info = {}
+        info_errors = []
+        for label, getter in (
+            ("ticker.info", lambda: t.info),
+            ("ticker.get_info", lambda: t.get_info()),
+        ):
+            try:
+                candidate = dict(getter() or {})
+                if candidate:
+                    info = candidate
+                    debug["sources"].append(f"company info: {label}")
+                    break
+                info_errors.append(f"{label} returned empty data")
+            except Exception as exc:
+                info_errors.append(f"{label}: {type(exc).__name__}")
+
+        # fast_info is a separate, lighter Yahoo endpoint. It does not provide P/E,
+        # but it can restore price, market cap, share count and quote currency.
+        fast = {}
         try:
-            info = dict(t.info or {})
-        except Exception:
-            info = {}
-            debug["warnings"].append("Yahoo company information unavailable")
+            fast_obj = t.fast_info
+            if fast_obj is not None:
+                for key in (
+                    "currency", "exchange", "quote_type", "last_price",
+                    "previous_close", "market_cap", "shares"
+                ):
+                    try:
+                        value = fast_obj.get(key)
+                        if value is not None:
+                            fast[key] = value
+                    except Exception:
+                        continue
+                if fast:
+                    debug["sources"].append("quote data: fast_info fallback")
+        except Exception as exc:
+            debug["warnings"].append(
+                f"Yahoo fast quote data unavailable ({type(exc).__name__})"
+            )
+
+        fast_aliases = {
+            "currency": "currency",
+            "exchange": "exchange",
+            "quoteType": "quote_type",
+            "currentPrice": "last_price",
+            "regularMarketPrice": "last_price",
+            "previousClose": "previous_close",
+            "marketCap": "market_cap",
+            "sharesOutstanding": "shares",
+        }
+        for info_key, fast_key in fast_aliases.items():
+            if not valid(info.get(info_key)) and valid(fast.get(fast_key)):
+                info[info_key] = fast[fast_key]
+
+        if not info:
+            detail = "; ".join(info_errors) if info_errors else "no quote profile returned"
+            debug["warnings"].append(
+                "Yahoo company profile is unavailable; using statement/price fallbacks. " + detail
+            )
 
         frames = {}
         getters = {
@@ -410,8 +466,11 @@ def fetch_stock(ticker):
         try:
             hist = t.history(period="1y", auto_adjust=True)
             prices = hist["Close"].dropna() if hist is not None and not hist.empty else None
-        except Exception:
+        except Exception as exc:
             prices = None
+            debug["warnings"].append(
+                f"Yahoo price history unavailable ({type(exc).__name__})"
+            )
 
         if not valid(info.get("currentPrice")) and prices is not None and len(prices):
             info["currentPrice"] = float(prices.iloc[-1])
@@ -433,10 +492,21 @@ def fetch_stock(ticker):
                   or frames.get("fin") is not None
                   or frames.get("bs") is not None)
         if not usable:
+            debug["warnings"].append("No usable quote, income statement or balance sheet data")
             return None
 
         debug["data_years"] = {k: (v.shape[1] if v is not None else 0) for k, v in frames.items()}
         debug["data_years"]["price_days"] = len(prices) if prices is not None else 0
+        debug["quote_fields"] = {
+            "currency": info.get("currency"),
+            "financialCurrency": info.get("financialCurrency"),
+            "trailingPE": info.get("trailingPE"),
+            "trailingEps": info.get("trailingEps"),
+            "marketCap": info.get("marketCap"),
+            "sharesOutstanding": info.get("sharesOutstanding"),
+            "sector": info.get("sector"),
+            "industry": info.get("industry"),
+        }
 
         return {**frames, "info": info, "prices": prices,
                 "holdings": holdings, "debug": debug}
@@ -592,51 +662,114 @@ def current_price(data):
 
 
 def get_market_cap(data, price):
-    reported = number(data["info"].get("marketCap"))
+    info = data.get("info", {})
+    reported = number(info.get("marketCap"))
     if valid(reported) and reported > 0:
         return reported, "Yahoo reported market cap"
-    shares = get_equity_shares(data.get("bs"), data["info"])
-    if valid(shares) and valid(price):
-        return price * shares, "Price x current shares"
+
+    # Last resort: current price multiplied by the latest available share count.
+    shares = get_equity_shares(data.get("bs"), info)
+    if valid(shares) and valid(price) and price > 0:
+        return price * shares, "Price x shares outstanding (fallback)"
     return None, "Not available"
 
 
 def get_pe(data, price):
+    """Return a defensible trailing P/E; never use unvalidated quarterly EPS sums."""
+    info = data.get("info", {}) or {}
+    debug = data.setdefault("debug", {})
+    debug.setdefault("valuation", {})
 
-    info = data.get("info", {})
+    reported_pe = number(info.get("trailingPE"))
+    reported_eps = number(info.get("trailingEps"))
+    quote_ccy = str(info.get("currency") or "").upper()
+    financial_ccy = str(info.get("financialCurrency") or "").upper()
+
+    debug["valuation"].update({
+        "price": number(price),
+        "quote_currency": quote_ccy or "not supplied",
+        "financial_currency": financial_ccy or "not supplied",
+        "yahoo_trailing_pe": reported_pe,
+        "yahoo_trailing_eps": reported_eps,
+    })
+
+    # 1) Prefer Yahoo's own trailing P/E when it is available.
+    if valid(reported_pe) and reported_pe > 0:
+        # A large mismatch against price / reported EPS is surfaced, not hidden.
+        if valid(price) and valid(reported_eps) and reported_eps > 0:
+            check_pe = price / reported_eps
+            if abs(check_pe / reported_pe - 1) > 0.20:
+                debug.setdefault("warnings", []).append(
+                    f"P/E cross-check differs: Yahoo trailing P/E {reported_pe:.2f}x "
+                    f"vs price / Yahoo trailing EPS {check_pe:.2f}x. Verify quote data."
+                )
+        debug["valuation"].update({"selected_source": "Yahoo trailing P/E", "selected_pe": reported_pe})
+        return round(reported_pe, 2), "Yahoo trailing P/E"
+
+    # 2) Use Yahoo trailing EPS only when its currency is not known to conflict
+    # with the traded share-price currency.
+    currency_conflict = bool(quote_ccy and financial_ccy and quote_ccy != financial_ccy)
+    if valid(price) and price > 0 and valid(reported_eps) and reported_eps > 0 and not currency_conflict:
+        pe = price / reported_eps
+        if valid(pe) and pe > 0:
+            debug["valuation"].update({"selected_source": "Price / Yahoo trailing EPS", "selected_pe": pe})
+            return round(pe, 2), "Price / Yahoo trailing EPS"
+
+    # 3) Calculate TTM P/E as market capitalisation / TTM net income.
+    # This avoids the bad quarterly EPS row that caused the 1,356x result.
     qfin = data.get("qfin")
-
-    print("\n========== INFOSYS PE DEBUG ==========")
-
-    print("PRICE:", price)
-    print("CURRENCY:", info.get("currency"))
-    print("FINANCIAL CURRENCY:", info.get("financialCurrency"))
-
-    print("TRAILING PE:", info.get("trailingPE"))
-    print("TRAILING EPS:", info.get("trailingEps"))
-
-    print("MARKET CAP:", info.get("marketCap"))
-
-    if qfin is not None:
-
-        field = choose_eps_field(qfin)
-
-        print("SELECTED EPS FIELD:", field)
-
-        if field:
-            for dt, col in dated_columns(qfin)[:8]:
-                print(
-                    dt,
-                    "EPS:",
-                    safe_get(qfin, field, col)
+    cols = dated_columns(qfin) if qfin is not None else []
+    if len(cols) >= 4 and not currency_conflict:
+        latest = cols[:4]
+        dates = [dt for dt, _ in latest]
+        gaps_ok = all(
+            70 <= (dates[i] - dates[i + 1]).days <= 110
+            for i in range(3)
+        )
+        quarterly_pat = [get_pat(qfin, col) for _, col in latest]
+        if gaps_ok and all(valid(x) for x in quarterly_pat):
+            ttm_pat = float(sum(quarterly_pat))
+            mcap, mcap_source = get_market_cap(data, price)
+            debug["valuation"].update({
+                "quarterly_pat_latest_four": quarterly_pat,
+                "ttm_pat": ttm_pat,
+                "market_cap": mcap,
+                "market_cap_source": mcap_source,
+                "quarter_dates": [str(d.date()) for d in dates],
+            })
+            if valid(mcap) and mcap > 0 and valid(ttm_pat) and ttm_pat > 0:
+                pe = mcap / ttm_pat
+                # A very extreme result is shown as unavailable for review rather than
+                # silently producing an implausible valuation from mismatched units.
+                if valid(pe) and 0 < pe < 1000:
+                    debug["valuation"].update({
+                        "selected_source": "Market cap / TTM PAT",
+                        "selected_pe": pe,
+                    })
+                    if not (quote_ccy and financial_ccy):
+                        debug.setdefault("warnings", []).append(
+                            "P/E calculated from market cap / TTM PAT; Yahoo did not provide "
+                            "both quote and financial currencies. Verify statement units."
+                        )
+                    return round(pe, 2), "Market cap / TTM PAT (calculated fallback)"
+                debug.setdefault("warnings", []).append(
+                    f"Calculated P/E {pe:.2f}x is outside the automatic acceptance range; verify units."
                 )
 
+    if currency_conflict:
+        debug.setdefault("warnings", []).append(
+            f"P/E not calculated because quote currency {quote_ccy} differs from "
+            f"financial statement currency {financial_ccy}."
+        )
     else:
-        print("QUARTERLY STATEMENT NOT AVAILABLE")
+        debug.setdefault("warnings", []).append(
+            "P/E unavailable: Yahoo trailing P/E/EPS and a consistent four-quarter PAT "
+            "plus market capitalisation were not all available. Verify financial data manually."
+        )
 
-    print("======================================\n")
+    debug["valuation"].update({"selected_source": "Unavailable", "selected_pe": None})
+    return None, "Unavailable - verify Yahoo valuation inputs"
 
-    return None, "Temporary P/E data investigation"
 
 # ============================================================
 # DEBT AND INTEREST COVERAGE
@@ -1939,6 +2072,10 @@ if page == "Single Stock":
                     st.warning(f)
 
             with t4:
+                st.write("**Valuation data check (no terminal required)**")
+                st.json(r["data"]["debug"].get("valuation", {}))
+                st.write("**Yahoo quote fields**")
+                st.json(r["data"]["debug"].get("quote_fields", {}))
                 st.write("**Data availability (columns returned)**")
                 st.json(r["data"]["debug"].get("data_years", {}))
                 st.write("**Data sources**")
@@ -2106,7 +2243,7 @@ else:
 
 **7. Ownership (leading).** Upload verified promoter, institutional and pledge data. Promoter below 20% caps at STANDARD; pledge above 25% caps at STANDARD, 50%+ caps at HALF.
 
-**8. Valuation.** PEG = trailing P/E / diluted EPS growth (sales growth used if EPS growth is more than twice sales growth). Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield only when CFO and capex are both reported. P/E above 80 is a warning.
+**8. Valuation.** P/E uses Yahoo trailing P/E when available, then Yahoo trailing EPS, then market capitalisation / latest four-quarter PAT as a labelled fallback. Unvalidated quarterly EPS sums are not used. PEG = trailing P/E / diluted EPS growth (sales growth used if EPS growth is more than twice sales growth). Forward P/E is never used. Negative EPS growth makes PEG not meaningful. FCF yield only when CFO and capex are both reported. P/E above 80 is a warning.
 
 **9. Momentum (leading).** EPS vs the same quarter last year for the latest two quarters; if only one comparison exists, it is scored alone.
 
